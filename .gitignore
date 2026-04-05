@@ -207,3 +207,59 @@ marimo/_lsp/
 __marimo__/
 
 .DS_Store
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# =========================
+# virtual env
+# =========================
+.venv/
+env/
+venv/
+
+# =========================
+# data (CRITICAL)
+# =========================
+DATA/
+
+# =========================
+# artifacts (generated)
+# =========================
+artifacts/
+
+# =========================
+# logs
+# =========================
+logs/
+
+# =========================
+# research configs (generated)
+# =========================
+configs/research/
+
+# =========================
+# notebook checkpoints
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+
+# =========================
+# common python extras (from partner)
+# =========================
+build/
+dist/
+*.egg-info/
+*.egg
+.env
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

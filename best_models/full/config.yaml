@@ -1,0 +1,50 @@
+model:
+  vocab_size: 5000
+  d_model: 256
+  nhead: 4
+  num_layers: 2
+  dim_feedforward: 1024
+  dropout: 0.0
+  activation: relu
+  position_encoding_type: sinusoidal
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+  max_length: 256
+
+data:
+  dataset_path: data/huggingface_full
+  split: training
+  max_length: 256
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+  tokenizer_path: data/tokenizer_full.json
+  random_crop: true
+  sliding_window_stride: 160
+  length_bucketing: false
+  crop_seed: 23
+  num_workers: 0
+
+training:
+  batch_size: 8
+  learning_rate: 0.0006
+  weight_decay: 0.0
+  grad_clip_norm: null
+  label_smoothing: 0.0
+  scheduler: linear
+  warmup_steps: 500
+  min_lr_ratio: 0.1
+  num_steps: 1000000
+  max_duration_seconds: 3600
+  early_stopping_patience: 20
+  early_stopping_min_delta: 0.0
+  log_every: 50
+  eval_every: 500
+  num_eval_batches: null
+  device: auto
+  save_checkpoint_path: artifacts/pretrained_decoder_full_best.pt
+  save_best_checkpoint_path: artifacts/pretrained_decoder_full_best_best.pt
+  resume_checkpoint_path: null
+  csv_log_path: logs/pretrain_full_best.csv
+  tensorboard_log_dir: logs/tensorboard/pretrain_full_best

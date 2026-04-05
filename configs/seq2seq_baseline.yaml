@@ -1,0 +1,103 @@
+model:
+  # ===== vocab =====
+  tgt_vocab_size: 5000
+
+  src_vocab_size_list: [128, 128, 128, 128, 128, 128, 128]
+  src_embedding_size_list: [16, 16, 16, 16, 16, 16, 16]
+
+  # ===== model size =====
+  d_model: 256
+  nhead: 4
+
+  # ===== layers =====
+  num_encoder_layers: 2
+  num_decoder_layers: 2
+
+  # ===== FFN =====
+  dim_feedforward: 1024
+
+  # ===== dropout =====
+  dropout: 0.1
+  activation: relu
+
+  # ===== position =====
+  position_encoding_type: sinusoidal
+  max_source_length: 128
+  max_target_length: 128
+
+  # ===== tokens =====
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+
+
+data:
+  dataset_path: DATA/huggingface_seq2seq_rd
+  split: training
+
+  max_source_length: 128
+  max_target_length: 128
+
+
+  tokenizer_path: DATA/tokenizer_rd.json
+
+  random_crop: true
+  crop_seed: 23
+
+  sliding_window_stride: null
+
+  length_bucketing: false
+  bucket_size_multiplier: 50
+
+  num_workers: 0
+
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+
+
+training:
+  # ===== pretrained decoder =====
+  pretrained_decoder_path: best_models/rd/best.pt
+
+  # ===== batch & optimizer =====
+  batch_size: 2
+  learning_rate: 0.0005
+  weight_decay: 0.01
+  grad_clip_norm: 1.0
+
+  label_smoothing: 0.0
+
+  # ===== scheduler =====
+  scheduler: linear
+  warmup_steps: 100
+  min_lr_ratio: 0.1
+
+  # ===== training =====
+  num_steps: 500   # ⚠️ 先小一点测试 pipeline
+  max_duration_seconds: null
+
+  # ===== eval =====
+  eval_every: 50
+  num_eval_batches: 8
+
+  early_stopping_patience: null
+  early_stopping_min_delta: 0.0
+
+  # ===== logging =====
+  log_every: 10
+
+  device: auto
+
+  # ===== checkpoint =====
+  save_checkpoint_path: artifacts/seq2seq/latest.pt
+  save_best_checkpoint_path: artifacts/seq2seq/best.pt
+  resume_checkpoint_path: null
+
+  # ===== logs =====
+  csv_log_path: logs/seq2seq.csv
+  tensorboard_log_dir: logs/tensorboard/seq2seq
+
+  # ===== freeze strategy =====
+  freeze_encoder: false
+  freeze_decoder: false
