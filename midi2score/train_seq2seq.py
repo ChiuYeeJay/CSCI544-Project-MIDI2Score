@@ -587,10 +587,10 @@ def _validate_setup(
     # =========================
     # 长度检查（原有）
     # =========================
-    if model_config.max_source_length < data_config.max_source_length:
+    if model_config.encoder_config.max_length < data_config.max_source_length:
         raise ValueError("model.max_source_length must be >= data.max_source_length.")
 
-    if model_config.max_target_length < data_config.max_target_length:
+    if model_config.decoder_config.max_length < data_config.max_target_length:
         raise ValueError("model.max_target_length must be >= data.max_target_length.")
 
     # =========================
@@ -599,11 +599,11 @@ def _validate_setup(
     tokenizer_vocab = data_config.tokenizer_vocab_size()
 
     if tokenizer_vocab is not None:
-        if tokenizer_vocab != model_config.tgt_vocab_size:
+        if tokenizer_vocab != model_config.decoder_config.vocab_size:
             raise ValueError(
                 f"Tokenizer vocab size ({tokenizer_vocab}) != "
-                f"model tgt_vocab_size ({model_config.tgt_vocab_size})"
+                f"model tgt_vocab_size ({model_config.decoder_config.vocab_size})"
             )
 
         print(f"[CHECK] tokenizer_vocab_size = {tokenizer_vocab}")
-        print(f"[CHECK] model tgt_vocab_size = {model_config.tgt_vocab_size}")
+        print(f"[CHECK] model tgt_vocab_size = {model_config.decoder_config.vocab_size}")

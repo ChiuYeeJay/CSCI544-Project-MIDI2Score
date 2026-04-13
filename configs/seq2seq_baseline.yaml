@@ -1,36 +1,7 @@
 model:
-  # ===== vocab =====
-  tgt_vocab_size: 5000
-
-  src_vocab_size_list: [128, 128, 128, 128, 128, 128, 128]
-  src_embedding_size_list: [16, 16, 16, 16, 16, 16, 16]
-
-  # ===== model size =====
-  d_model: 256
-  nhead: 4
-
-  # ===== layers =====
-  num_encoder_layers: 2
-  num_decoder_layers: 2
-
-  # ===== FFN =====
-  dim_feedforward: 1024
-
-  # ===== dropout =====
-  dropout: 0.1
-  activation: relu
-
-  # ===== position =====
-  position_encoding_type: sinusoidal
-  max_source_length: 128
-  max_target_length: 128
-
-  # ===== tokens =====
-  pad_token_id: 0
-  bos_token_id: 1
-  eos_token_id: 2
-
-
+  encoder_config_path: configs/encoder_baseline.yaml
+  decoder_config_path: configs/pretrain_rd_best.yaml
+  
 data:
   dataset_path: DATA/huggingface_seq2seq_rd
   split: training

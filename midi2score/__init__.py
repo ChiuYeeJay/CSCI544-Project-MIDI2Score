@@ -14,6 +14,12 @@ from midi2score.model_seq2seq import (
     apply_lora,
 )
 
+from midi2score.model_decoder import (
+    DecoderLanguageModelConfig,
+    TransformerDecoderLM,
+    SinusoidalPositionalEncoding,
+)
+
 from midi2score.train_seq2seq import (
     Seq2SeqTrainingConfig,
     Seq2SeqTrainingResult,
@@ -32,6 +38,9 @@ __all__ = [
     "Seq2SeqConfig",
     "TransformerForConditionalGeneration",
     "apply_lora",
+    "DecoderLanguageModelConfig",
+    "TransformerDecoderLM",
+    "SinusoidalPositionalEncoding",
 
     # train
     "Seq2SeqTrainingConfig",
