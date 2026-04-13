@@ -1,7 +1,35 @@
 model:
-  encoder_config_path: configs/encoder_baseline.yaml
-  decoder_config_path: configs/pretrain_rd_best.yaml
+  decoder:
+    vocab_size: 5000
+    d_model: 512
+    nhead: 8
+    num_layers: 4
+    dim_feedforward: 2048
+    dropout: 0.05
+    activation: swiglu
+    pad_token_id: 0
+    bos_token_id: 1
+    eos_token_id: 2
+    max_length: 1024
   
+  encoder:
+    d_model: 512
+    nhead: 8
+    num_layers: 8
+    dim_feedforward: 2048
+    dropout: 0.05
+    activation: "swiglu"
+    max_length: 2048
+    position_encoding_type: "sinusoidal"
+
+    # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
+    src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
+    src_embedding_size_list: [8, 64, 64, 64, 32, 32, 32]
+
+    pad_token_id: 0
+    bos_token_id: 1
+    eos_token_id: 2
+
 data:
   dataset_path: DATA/huggingface_seq2seq_rd
   split: training
@@ -33,6 +61,8 @@ training:
 
   # ===== batch & optimizer =====
   batch_size: 2
+  accumulate_grad_batches: 1
+  precision: bf16-mixed
   learning_rate: 0.0005
   weight_decay: 0.01
   grad_clip_norm: 1.0
@@ -56,7 +86,7 @@ training:
   early_stopping_min_delta: 0.0
 
   # ===== logging =====
-  log_every: 10
+  log_every: 50
 
   device: auto
 

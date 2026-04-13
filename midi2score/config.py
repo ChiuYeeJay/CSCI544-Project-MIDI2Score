@@ -19,27 +19,6 @@ class Seq2SeqProjectConfig:
     data: Seq2SeqDataConfig
     training: Seq2SeqTrainingConfig
 
-def load_model_configs(model_section: dict[str, Any]) -> Seq2SeqConfig:
-    # load encoder config
-    encoder_config_path = Path(model_section["encoder_config_path"])
-    with encoder_config_path.open("r", encoding="utf-8") as handle:
-        encoder_raw_config = yaml.safe_load(handle)
-    if not isinstance(encoder_raw_config, dict):
-        raise ValueError("Encoder config contains errors")
-    encoder_config = EncoderConfig(**encoder_raw_config)
-
-    # load decoder config
-    decoder_config_path = Path(model_section["decoder_config_path"])
-    with decoder_config_path.open("r", encoding="utf-8") as handle:
-        decoder_raw_config = yaml.safe_load(handle)
-    if not isinstance(decoder_raw_config, dict):
-        raise ValueError("Decoder config contains errors")
-    decoder_model_section = _get_section(decoder_raw_config, "model")
-    decoder_config = DecoderLanguageModelConfig(**decoder_model_section)
-
-    return Seq2SeqConfig(encoder_config=encoder_config, decoder_config=decoder_config)
-
-
 def load_seq2seq_config(path: str | Path) -> Seq2SeqProjectConfig:
     config_path = Path(path)
 
@@ -48,12 +27,19 @@ def load_seq2seq_config(path: str | Path) -> Seq2SeqProjectConfig:
 
     if not isinstance(raw_config, dict):
         raise ValueError("Top-level config must be a mapping with model/data/training sections.")
+    
     model_section = _get_section(raw_config, "model")
+    if not (model_section.get("encoder") and model_section.get("decoder")):
+        raise ValueError("model section must be a mapping with encoder/decoder sub-sections.")
+    
     data_section = _get_section(raw_config, "data")
     training_section = _get_section(raw_config, "training")
 
     return Seq2SeqProjectConfig(
-        model=load_model_configs(model_section),
+        model=Seq2SeqConfig(
+            encoder_config=EncoderConfig(**model_section["encoder"]), 
+            decoder_config=DecoderLanguageModelConfig(**model_section["decoder"])
+        ),
         data=Seq2SeqDataConfig(**data_section),
         training=Seq2SeqTrainingConfig(**training_section),
     )

@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from midi2score.config import load_seq2seq_config   # ⚠️ 你需要有这个函数
+from midi2score.config import load_seq2seq_config
 from midi2score.research import parse_override_value, run_research_experiment
 from midi2score.train_seq2seq import run_seq2seq_training_loop
 
@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="overrides",
         action="append",
         default=[],
-        help="Override in dotted form, e.g. model.d_model=256",
+        help="Override in dotted form, e.g. model.encoder.d_model=256",
     )
 
     parser.add_argument(
@@ -82,7 +82,7 @@ def main() -> None:
             project_config.training,
         )
 
-        print(f"finished {len(result.losses)} training steps on {result.device}")
+        print(f"finished {result.final_step} training steps on {result.device}")
         print(
             f"final_step={result.final_step} elapsed_seconds={result.elapsed_seconds:.2f} "
             f"stopped_due_to_time_budget={result.stopped_due_to_time_budget}"

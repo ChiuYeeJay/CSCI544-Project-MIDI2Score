@@ -194,37 +194,3 @@ class TransformerForConditionalGeneration(nn.Module):
         )
 
         return loss, logits
-    
-class LoRA(nn.Module):
-    def __init__(self, in_features, out_features, rank):
-        super().__init__()
-        self.A = nn.Linear(in_features, rank, bias=False)
-        self.B = nn.Linear(rank, out_features, bias=False)
-
-        nn.init.normal_(self.A.weight, std=0.02)
-        nn.init.zeros_(self.B.weight)
-
-    def forward(self, x):
-        return self.B(self.A(x))
-
-
-def apply_lora(model, rank=8):
-    modules = list(model.named_modules())
-    for name, module in modules:
-        if isinstance(module, nn.Linear):
-
-            lora = LoRA(
-                module.in_features,
-                module.out_features,
-                rank=rank
-            ).to(module.weight.device)
-
-            module.lora = lora
-            module._original_forward = module.forward
-
-            def make_forward(module):
-                def forward(x):
-                    return module._original_forward(x) + module.lora(x)
-                return forward
-
-            module.forward = make_forward(module)
