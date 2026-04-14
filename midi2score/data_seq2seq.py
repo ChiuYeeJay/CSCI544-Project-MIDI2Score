@@ -63,7 +63,6 @@ class Seq2SeqDataConfig:
             [0.1, 0.4, 0.5]
         ]
     )
-    curriculum_learning_seed: int = 42
 
     # =========================
     # Validation
@@ -133,8 +132,6 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
     def __init__(self, config: Seq2SeqDataConfig):
         self.config = config
 
-        seed = config.curriculum_learning_seed
-        self.generator = torch.Generator().manual_seed(seed)
         self.current_stage = 0
 
         dataset_dict = load_from_disk(config.dataset_path)
@@ -151,7 +148,7 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
         
         noise_keys = ["midi_clean_ids", "midi_light_ids", "midi_heavy_ids"]
         probs = torch.tensor(self.config.curriculum_stage_prob[self.current_stage])
-        idx = torch.multinomial(probs, num_samples=1, generator=self.generator).item()
+        idx = torch.multinomial(probs, num_samples=1).item()
         selected_key = noise_keys[idx]
 
         lmx = item["lmx_ids"]
@@ -295,7 +292,6 @@ def build_seq2seq_dataloader(
             collate_seq2seq_batch,
             pad_token_id=config.pad_token_id,
         ),
-        "persistent_workers": config.num_workers > 0,
     }
 
     if config.split == "training" and config.length_bucketing:

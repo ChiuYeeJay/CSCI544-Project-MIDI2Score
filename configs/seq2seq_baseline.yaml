@@ -49,7 +49,6 @@ data:
   bos_token_id: 1
   eos_token_id: 2
 
-  curriculum_learning_seed: 42
   curriculum_stage_prob: 
     - [1.0, 0.0, 0.0]
     - [0.25, 0.75, 0.0]
@@ -100,9 +99,11 @@ training:
   csv_log_path: logs/seq2seq.csv
   tensorboard_log_dir: logs/tensorboard/seq2seq
 
-  # ===== freeze strategy =====
-  freeze_encoder: false
-  freeze_decoder: false
+  # ===== LoRA strategy =====
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
 
   curriculum_learning: true
   curriculum_epoch_schedule: [0, 4, 7]

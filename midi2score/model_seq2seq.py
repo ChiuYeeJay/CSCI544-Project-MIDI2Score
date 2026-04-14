@@ -31,6 +31,8 @@ class EncoderConfig:
             raise ValueError("d_model must be divisible by nhead.")
         if len(self.src_vocab_size_list) != len(self.src_embedding_size_list):
             raise ValueError("src_vocab_size_list and src_embedding_size_list must match")
+        if self.position_encoding_type not in {"sinusoidal", "rope"}:
+            raise ValueError("position_encoding_type must be one of {'sinusoidal', 'rope'}")
     
     def to_dict(self):
         return asdict(self)
@@ -75,6 +77,7 @@ class TransformerEncoder(nn.Module):
     def __init__(self, config: EncoderConfig) -> None:
         super().__init__()
         self.config = config
+        self.use_rope = config.position_encoding_type == "rope"
 
         self.embedding = CPWordEmbedding(
             vocab_size_list=config.src_vocab_size_list,
@@ -83,7 +86,9 @@ class TransformerEncoder(nn.Module):
             pad_token_id=config.pad_token_id,
         )
 
-        self.position_encoding = SinusoidalPositionalEncoding(config.d_model, config.max_length)
+        self.position_encoding = None
+        if not self.use_rope:
+            self.position_encoding = SinusoidalPositionalEncoding(config.d_model, config.max_length)
         self.dropout = nn.Dropout(config.dropout)
 
         self.encoder = Encoder(
@@ -98,7 +103,7 @@ class TransformerEncoder(nn.Module):
             ff_glu=True,
             ff_swish = True,
             attn_flash=True,
-            rotary_pos_emb=False,
+            rotary_pos_emb=self.use_rope,
         )
 
     def forward(
@@ -110,7 +115,11 @@ class TransformerEncoder(nn.Module):
         
         embeddings = self.embedding(input_tokens)
         
-        x = self.dropout(embeddings + self.position_encoding(input_tokens))
+        if self.position_encoding is not None:
+            x = embeddings + self.position_encoding(input_tokens)
+        else:
+            x = embeddings
+        x = self.dropout(x)
 
         x_mask = None
         if padding_mask is not None:

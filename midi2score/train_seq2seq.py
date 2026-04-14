@@ -52,8 +52,10 @@ class Seq2SeqTrainingConfig:
     csv_log_path: str | None = None
     tensorboard_log_dir: str | None = None
 
-    freeze_encoder: bool = False
-    freeze_decoder: bool = False
+    use_lora: bool = True
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
 
     curriculum_learning: bool = False
     curriculum_epoch_schedule: list[int] = field(default_factory=lambda: [0, 5, 15])
@@ -255,6 +257,10 @@ def _validate_setup(model_config: Seq2SeqConfig, data_config: Seq2SeqDataConfig)
                 f"model tgt_vocab_size ({model_config.decoder_config.vocab_size})"
             )
 
+
+# =========================
+# Curriculum Learning Callback
+# =========================
 class CurriculumLearningCallback(Callback):
     def on_train_epoch_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
         training_config = pl_module.training_config
@@ -301,26 +307,39 @@ def run_seq2seq_training_loop(
     if training_config.pretrained_decoder_path is not None:
         load_pretrained_decoder(model, training_config.pretrained_decoder_path)
 
-    # 4. 套用 PEFT LoRA 到 Decoder
-    peft_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        target_modules="all-linear", # 自動抓取 Decoder 中所有的 nn.Linear
-        lora_dropout=0.05,
-        bias="none",
-    )
-    # 這裡直接覆蓋 base model 內的 decoder 為 PeftModel
-    model.model.decoder = get_peft_model(model.model.decoder, peft_config)
+    # 4. 依設定決定是否對 Decoder 套用 PEFT LoRA
+    if training_config.use_lora:
+        peft_config = LoraConfig(
+            r=training_config.lora_r,
+            lora_alpha=training_config.lora_alpha,
+            target_modules="all-linear", # 自動抓取 Decoder 中所有的 nn.Linear
+            lora_dropout=training_config.lora_dropout,
+            bias="none",
+        )
+        # 這裡直接覆蓋 base model 內的 decoder 為 PeftModel
+        model.model.decoder = get_peft_model(model.model.decoder, peft_config)
 
-    # 5. 設定 Freezing 邏輯
-    # PEFT 預設會將原本的 Decoder base_model 凍結，只開啟 lora 的 gradient
-    # 但我們需要手動確保 Encoder 的狀態符合需求
-    for p in model.model.encoder.parameters():
-        p.requires_grad = not training_config.freeze_encoder
+        # 5. 設定 Freezing 邏輯
+        # PEFT 預設會將原本的 Decoder base_model 凍結，只開啟 lora 的 gradient
+        # 但我們需要手動確保 Encoder 的狀態符合需求
+        for p in model.model.encoder.parameters():
+            p.requires_grad = True
+        
+        print("\n==== TRAINABLE PARAMS ====")
+        model.model.decoder.print_trainable_parameters()
 
-    print("\n==== TRAINABLE PARAMS ====")
-    # 使用 PEFT 內建方法印出可訓練參數比例
-    model.model.decoder.print_trainable_parameters()
+    else:
+        for p in model.parameters():
+            p.requires_grad = True
+        
+        print("\n==== TRAINABLE PARAMS ====")
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        ratio = 100.0 * trainable_params / max(total_params, 1)
+        print(
+            f"trainable params: {trainable_params:,} || "
+            f"all params: {total_params:,} || trainable%: {ratio:.4f}"
+        )
     
     # 6. 設定 PyTorch Lightning Loggers
     loggers = []
@@ -357,7 +376,6 @@ def run_seq2seq_training_loop(
         callbacks.append(CurriculumLearningCallback())
 
     # 8. 建立 Lightning Trainer
-    # Lightning 中的 val_check_interval 可以設為 int (steps)
     val_check_interval = training_config.eval_every if training_config.eval_every > 0 else None
     
     trainer = L.Trainer(
@@ -366,6 +384,7 @@ def run_seq2seq_training_loop(
         precision=training_config.precision,
         max_steps=training_config.num_steps,
         val_check_interval=val_check_interval,
+        check_val_every_n_epoch=None,
         limit_val_batches=training_config.num_eval_batches if training_config.num_eval_batches else 1.0,
         gradient_clip_val=training_config.grad_clip_norm,
         logger=loggers if loggers else False,
