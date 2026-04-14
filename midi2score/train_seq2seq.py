@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import copy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from lightning.pytorch.callbacks import Callback
 from pathlib import Path
 
@@ -54,6 +54,9 @@ class Seq2SeqTrainingConfig:
 
     freeze_encoder: bool = False
     freeze_decoder: bool = False
+
+    curriculum_learning: bool = False
+    curriculum_epoch_schedule: list[int] = field(default_factory=lambda: [0, 5, 15])
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0:
@@ -252,6 +255,23 @@ def _validate_setup(model_config: Seq2SeqConfig, data_config: Seq2SeqDataConfig)
                 f"model tgt_vocab_size ({model_config.decoder_config.vocab_size})"
             )
 
+class CurriculumLearningCallback(Callback):
+    def on_train_epoch_start(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        training_config = pl_module.training_config
+        epoch = trainer.current_epoch
+        
+        if epoch in training_config.curriculum_epoch_schedule:
+            target_stage = training_config.curriculum_epoch_schedule.index(epoch)
+            
+            train_loader = trainer.train_dataloader
+            if train_loader is not None:
+                dataset = train_loader.dataset
+                dataset.set_stage(target_stage)
+                
+                pl_module.log("curriculum/stage_index", target_stage)
+                
+            if trainer.is_global_zero:
+                print(f"\n[Curriculum] Epoch {epoch}: Switching to stage '{target_stage}'")
 
 # =========================
 # Main Training Logic
@@ -272,7 +292,6 @@ def run_seq2seq_training_loop(
     if training_config.eval_every > 0:
         val_data_config = copy.deepcopy(data_config)
         val_data_config.split = "validation"
-        val_data_config.random_crop = False
         val_loader = build_seq2seq_dataloader(val_data_config, batch_size=training_config.batch_size, shuffle=False)
 
     # 2. 初始化模型
@@ -333,6 +352,9 @@ def run_seq2seq_training_loop(
                 mode="min"
             )
         )
+    
+    if training_config.curriculum_learning:
+        callbacks.append(CurriculumLearningCallback())
 
     # 8. 建立 Lightning Trainer
     # Lightning 中的 val_check_interval 可以設為 int (steps)
@@ -350,7 +372,7 @@ def run_seq2seq_training_loop(
         callbacks=callbacks,
         accumulate_grad_batches=training_config.accumulate_grad_batches,
         log_every_n_steps=training_config.log_every,
-        # max_time 轉換 (若有設定)
+        reload_dataloaders_every_n_epochs=1,
         max_time=None if not training_config.max_duration_seconds else f"00:00:00:{int(training_config.max_duration_seconds)}"
     )
 

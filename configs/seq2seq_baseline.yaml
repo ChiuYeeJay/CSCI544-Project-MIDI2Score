@@ -37,22 +37,23 @@ data:
   max_source_length: 128
   max_target_length: 128
 
-
   tokenizer_path: DATA/tokenizer_rd.json
-
-  random_crop: true
-  crop_seed: 23
-
-  sliding_window_stride: null
 
   length_bucketing: false
   bucket_size_multiplier: 50
 
   num_workers: 0
+  shuffle_seed: 42
 
   pad_token_id: 0
   bos_token_id: 1
   eos_token_id: 2
+
+  curriculum_learning_seed: 42
+  curriculum_stage_prob: 
+    - [1.0, 0.0, 0.0]
+    - [0.25, 0.75, 0.0]
+    - [0.1, 0.4, 0.5]
 
 
 training:
@@ -102,3 +103,6 @@ training:
   # ===== freeze strategy =====
   freeze_encoder: false
   freeze_decoder: false
+
+  curriculum_learning: true
+  curriculum_epoch_schedule: [0, 4, 7]

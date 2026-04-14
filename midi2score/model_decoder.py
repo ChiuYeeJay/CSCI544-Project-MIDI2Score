@@ -142,7 +142,7 @@ class TransformerDecoderLayer(nn.Module):
         self,
         tgt: Tensor,
         *,
-        memory: Tensor,
+        memory: Tensor | None = None,
         tgt_causal_mask: Tensor,
         tgt_padding_mask: Tensor | None = None,
         memory_padding_mask: Tensor | None = None,
@@ -158,17 +158,18 @@ class TransformerDecoderLayer(nn.Module):
             need_weights=False,
         )[0]
         x = x + self.dropout1(self_attn_output)
-        
+
         # Cross Attention
-        cross_input = self.norm3(x)
-        cross_attn_output = self.cross_attn(
-            query=cross_input,
-            key=memory,
-            value=memory,
-            key_padding_mask=memory_padding_mask,
-            need_weights=False,
-        )[0]
-        x = x + self.dropout3(cross_attn_output)
+        if memory is not None:
+            cross_input = self.norm3(x)
+            cross_attn_output = self.cross_attn(
+                query=cross_input,
+                key=memory,
+                value=memory,
+                key_padding_mask=memory_padding_mask,
+                need_weights=False,
+            )[0]
+            x = x + self.dropout3(cross_attn_output)
 
         ff_input = self.norm2(x)
         ff_output = self.feedforward(ff_input)
@@ -202,7 +203,7 @@ class TransformerDecoderStack(nn.Module):
         self,
         tgt: Tensor,
         *,
-        memory: Tensor,
+        memory: Tensor | None = None,
         tgt_causal_mask: Tensor,
         tgt_padding_mask: Tensor | None = None,
         memory_padding_mask: Tensor | None = None,
@@ -255,7 +256,7 @@ class TransformerDecoderLM(nn.Module):
         self, 
         input_tokens: Tensor, 
         *, 
-        memory: Tensor,
+        memory: Tensor | None = None, # 3. 設為 Optional
         padding_mask: Tensor | None = None,
         memory_padding_mask: Tensor | None = None,
     ) -> Tensor:

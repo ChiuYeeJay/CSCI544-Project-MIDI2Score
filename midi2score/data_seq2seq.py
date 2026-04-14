@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from functools import partial
 from typing import TypedDict
+import warnings
 
 import torch
 from datasets import Dataset as HFDataset
@@ -33,17 +34,6 @@ class Seq2SeqDataConfig:
     tokenizer_path: str | None = None
 
     # =========================
-    # Cropping
-    # =========================
-    random_crop: bool = True
-    crop_seed: int = 0
-
-    # =========================
-    # Sliding window
-    # =========================
-    sliding_window_stride: int | None = None
-
-    # =========================
     # Length bucketing
     # =========================
     length_bucketing: bool = False
@@ -53,6 +43,7 @@ class Seq2SeqDataConfig:
     # Dataloader
     # =========================
     num_workers: int = 0
+    shuffle_seed: int = 0
 
     # =========================
     # Tokens
@@ -60,6 +51,19 @@ class Seq2SeqDataConfig:
     pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
+
+    # =========================
+    # Curriculum Learning
+    # =========================
+    # [no_noise, light_noise, heavy_noise]
+    curriculum_stage_prob: list[list[float]] = field(
+        default_factory=lambda: [
+            [1.0, 0.0, 0.0],
+            [0.25, 0.75, 0.0],
+            [0.1, 0.4, 0.5]
+        ]
+    )
+    curriculum_learning_seed: int = 42
 
     # =========================
     # Validation
@@ -74,11 +78,14 @@ class Seq2SeqDataConfig:
         if self.split not in {"training", "validation", "test"}:
             raise ValueError("split must be one of training/validation/test")
 
-        if self.sliding_window_stride is not None and self.sliding_window_stride <= 0:
-            raise ValueError("sliding_window_stride must be positive")
-
         if self.bucket_size_multiplier <= 0:
             raise ValueError("bucket_size_multiplier must be positive")
+        
+        for i in range(len(self.curriculum_stage_prob)):
+            if sum(self.curriculum_stage_prob[i]) != 1.0:
+                warnings.warn(f"curriculum_stage_prob[{i}] do not sum to 1.0, normalizing them to sum to 1.0")
+                total = sum(self.curriculum_stage_prob[i])
+                self.curriculum_stage_prob[i] = [p / total for p in self.curriculum_stage_prob[i]]
 
     # =========================
     # 🔥 tokenizer vocab size
@@ -126,185 +133,108 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
     def __init__(self, config: Seq2SeqDataConfig):
         self.config = config
 
+        seed = config.curriculum_learning_seed
+        self.generator = torch.Generator().manual_seed(seed)
+        self.current_stage = 0
+
         dataset_dict = load_from_disk(config.dataset_path)
         if not isinstance(dataset_dict, DatasetDict):
             raise ValueError("dataset_path must point to DatasetDict")
 
         self.dataset: HFDataset = dataset_dict[config.split]
 
-        self._crop_generators: dict[int, torch.Generator] = {}
-        self._window_index: list[tuple[int, int]] | None = None
-
-        if config.sliding_window_stride is not None:
-            self._window_index = self._build_window_index()
-
     def __len__(self):
-        return len(self._window_index) if self._window_index else len(self.dataset)
+        return len(self.dataset)
 
     def __getitem__(self, index: int) -> Seq2SeqExample:
-        raw_index, window_start = self._resolve_index(index)
-
-        item = self.dataset[raw_index]
-        midi = item["midi_clean_ids"]
-        lmx = item["lmx_ids"]
-
-        # =========================
-        # 🎯 计算 start（统一逻辑）
-        # =========================
-        if window_start is not None:
-            # sliding window 情况
-            base_start = window_start
-        else:
-            # random crop（training 时）
-            if self.config.random_crop and self.config.split == "training":
-                max_start = min(
-                        max(len(midi) - self.config.max_source_length, 0),
-                        max(len(lmx) - self.config.max_target_length, 0)
-                    )
-
-                base_start = int(
-                    torch.randint(
-                        0,
-                        max_start + 1,
-                        (1,),
-                        generator=self._get_crop_generator()
-                    )
-                )
-            else:
-                base_start = None
-
-        # =========================
-        # 🎯 ratio 弱对齐
-        # =========================
-        if base_start is not None:
-            ratio = (len(lmx) - 1) / max(len(midi) - 1, 1)
-
-            midi_start = base_start
-            lmx_start = int(base_start * ratio)
+        item = self.dataset[index]
         
-            lmx_start = min(
-                lmx_start,
-                max(len(lmx) - self.config.max_target_length, 0)
-            )
-        else:
-            midi_start = None
-            lmx_start = None
+        noise_keys = ["midi_clean_ids", "midi_light_ids", "midi_heavy_ids"]
+        probs = torch.tensor(self.config.curriculum_stage_prob[self.current_stage])
+        idx = torch.multinomial(probs, num_samples=1, generator=self.generator).item()
+        selected_key = noise_keys[idx]
 
-        # =========================
-        # 🎯 分别裁剪（不等长）
-        # =========================
-        midi = self._trim(
-            midi,
-            midi_start,
-            self.config.max_source_length
-        )
+        lmx = item["lmx_ids"]
+        midi = item[selected_key]
 
-        lmx = self._trim(
-            lmx,
-            lmx_start,
-            self.config.max_target_length - 1  # 给 EOS 留位置
-        )
-
-        # =========================
-        # 🎯 加 EOS（decoder）
-        # =========================
-        lmx = lmx + [self.config.eos_token_id]
+        midi_trimmed = midi[:self.config.max_source_length]
+        lmx_trimmed = lmx[:self.config.max_target_length]
 
         return {
-            "encoder_tokens": torch.tensor(midi, dtype=torch.long),
-            "decoder_tokens": torch.tensor(lmx, dtype=torch.long),
+            "encoder_tokens": torch.tensor(midi_trimmed, dtype=torch.long),
+            "decoder_tokens": torch.tensor(lmx_trimmed, dtype=torch.long),
         }
-
-    def _resolve_index(self, index):
-        if self._window_index is None:
-            return index, None
-        return self._window_index[index]
-
-    def _trim(self, seq, start, max_len):
-        if len(seq) <= max_len:
-            return seq
-
-        if start is not None:
-            return seq[start:start + max_len]
-
-        return seq[:max_len]
-
-    def _build_window_index(self):
-        stride = self.config.sliding_window_stride
-        windows = []
-
-        for i in range(len(self.dataset)):
-            midi = self.dataset[i]["midi_clean_ids"]
-            lmx = self.dataset[i]["lmx_ids"]
-
-            src_len = len(midi)
-            tgt_len = len(lmx)
-
-            max_src_start = max(src_len - self.config.max_source_length, 0)
-            max_tgt_start = max(tgt_len - self.config.max_target_length, 0)
-
-            max_start = max(max_src_start, max_tgt_start)
-
-            if max_start == 0:
-                windows.append((i, 0))
-                continue
-
-            starts = list(range(0, max_start + 1, stride))
-            if starts[-1] != max_start:
-                starts.append(max_start)
-
-            windows.extend((i, s) for s in starts)
-
-        return windows
-
-    def _get_crop_generator(self):
-        worker_info = get_worker_info()
-        worker_id = worker_info.id if worker_info else 0
-
-        generator = self._crop_generators.get(worker_id)
-        if generator is None:
-            generator = torch.Generator()
-            generator.manual_seed(self.config.crop_seed + 1_000_003 * worker_id)
-            self._crop_generators[worker_id] = generator
-
-        return generator
-
+    
+    def set_stage(self, stage: int):
+        if 0 <= stage and stage < len(self.config.curriculum_stage_prob):
+            self.current_stage = stage
+            self.noise_probs = self.config.curriculum_stage_prob[stage]
+            # print(f"Dataset switched to stage: {stage} (Probs: {self.noise_probs})")
+        else:
+            raise ValueError(f"Stage {stage} is out of bounds for curriculum_stage_prob")
 
 # =========================
-# Length Bucketing（完整补上）
+# Length Bucketing
 # =========================
 class LengthBucketBatchSampler(BatchSampler):
-    def __init__(self, *, dataset, batch_size, drop_last, seed, bucket_size_multiplier):
+    def __init__(
+        self,
+        dataset: HuggingFaceSeq2SeqDataset,
+        batch_size: int,
+        bucket_size_multiplier: int = 50,
+        seed: int = 0,
+        shuffle: bool = True,
+        drop_last: bool = False,
+    ) -> None:
         self.dataset = dataset
         self.batch_size = batch_size
-        self.drop_last = drop_last
-        self.seed = seed
         self.bucket_size_multiplier = bucket_size_multiplier
+        self.seed = seed
+        self.shuffle = shuffle
+        self.drop_last = drop_last
         self._epoch = 0
+        
+        self._lengths = [len(item["lmx_ids"]) for item in dataset.dataset]
 
     def __iter__(self):
-        g = torch.Generator().manual_seed(self.seed + self._epoch)
+        generator = torch.Generator().manual_seed(self.seed + self._epoch)
         self._epoch += 1
-
-        indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        
+        # shuffle global order of examples
+        if self.shuffle:
+            indices = torch.randperm(len(self.dataset), generator=generator).tolist()
+        else:
+            indices = list(range(len(self.dataset)))
+        
         bucket_size = self.batch_size * self.bucket_size_multiplier
+        batches: list[list[int]] = []
 
-        batches = []
-        for i in range(0, len(indices), bucket_size):
-            pool = indices[i:i + bucket_size]
-            for j in range(0, len(pool), self.batch_size):
-                batch = pool[j:j + self.batch_size]
-                if len(batch) == self.batch_size or not self.drop_last:
-                    batches.append(batch)
+        for start in range(0, len(indices), bucket_size):
+            pool = indices[start : start + bucket_size]
+            
+            # sort the pool by length in descending order
+            pool.sort(key=lambda x: self._lengths[x], reverse=True)
+            
+            # split the pool into batches
+            for i in range(0, len(pool), self.batch_size):
+                batch = pool[i : i + self.batch_size]
+                if self.drop_last and len(batch) < self.batch_size:
+                    continue
+                batches.append(batch)
 
-        for idx in torch.randperm(len(batches), generator=g):
-            yield batches[idx]
+        if self.shuffle:
+            shuffled_batch_indices = torch.randperm(len(batches), generator=generator).tolist()
+            for batch_idx in shuffled_batch_indices:
+                yield batches[batch_idx]
+        else:
+            for batch in batches:
+                yield batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self.drop_last:
             return len(self.dataset) // self.batch_size
-        return (len(self.dataset) + self.batch_size - 1) // self.batch_size
-
+        else:
+            return (len(self.dataset) + self.batch_size - 1) // self.batch_size
 
 # =========================
 # Collate
@@ -313,7 +243,6 @@ def collate_seq2seq_batch(
     examples: list[Seq2SeqExample],
     *,
     pad_token_id: int,
-    bos_token_id: int,
 ) -> Seq2SeqBatch:
 
     encoder_tokens = pad_sequence(
@@ -329,11 +258,9 @@ def collate_seq2seq_batch(
     )
 
     # shift right
-    decoder_input = decoder_tokens.clone()
-    decoder_input[:, 1:] = decoder_tokens[:, :-1]
-    decoder_input[:, 0] = bos_token_id
+    decoder_input = decoder_tokens[:, :-1].clone()
 
-    labels = decoder_tokens.clone()
+    labels = decoder_tokens[:, 1:].clone()
     labels[labels == pad_token_id] = -100
 
     # ✅ 更安全 mask（针对 [T,7]）
@@ -367,22 +294,24 @@ def build_seq2seq_dataloader(
         "collate_fn": partial(
             collate_seq2seq_batch,
             pad_token_id=config.pad_token_id,
-            bos_token_id=config.bos_token_id,
         ),
+        "persistent_workers": config.num_workers > 0,
     }
 
     if config.split == "training" and config.length_bucketing:
+        print("Using LengthBucketBatchSampler for training dataloader.")
         dataloader_kwargs["batch_sampler"] = LengthBucketBatchSampler(
             dataset=dataset,
             batch_size=batch_size,
-            drop_last=False,
-            seed=config.crop_seed,
             bucket_size_multiplier=config.bucket_size_multiplier,
+            seed=config.shuffle_seed,
+            shuffle=shuffle,
+            drop_last=False,
         )
     else:
         generator = None
         if config.split == "training":
-            generator = torch.Generator().manual_seed(config.crop_seed)
+            generator = torch.Generator().manual_seed(config.shuffle_seed)
 
         dataloader_kwargs["batch_size"] = batch_size
         dataloader_kwargs["shuffle"] = shuffle
