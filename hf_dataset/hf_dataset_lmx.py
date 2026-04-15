@@ -74,6 +74,7 @@ def main():
             tokenizer.eval_mode()
 
         input_ids_batch = []
+        length_batch = []
         for file_path in examples['lmx_full_path']:
             # Read LMX text
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -82,8 +83,9 @@ def main():
             # Convert LMX to BPE token IDs
             token_ids = tokenizer.encode_lmx_to_bpe(lmx_content)
             input_ids_batch.append(token_ids[:MAX_SEQ_LENGTH])
-            
-        return {"input_ids": input_ids_batch}
+            length_batch.append(len(token_ids[:MAX_SEQ_LENGTH]))
+
+        return {"input_ids": input_ids_batch, "length": length_batch}
 
     # ==========================================
     # 4. Execute High-Efficiency Processing

@@ -103,6 +103,7 @@ def main():
         batch_midi_clean = []
         batch_midi_light = []
         batch_midi_heavy = []
+        batch_lmx_lengths = []
 
         for lmx_path, midi_path in zip(examples['lmx_full_path'], examples['midi_full_path']):
             try:
@@ -110,6 +111,7 @@ def main():
                 with open(lmx_path, 'r', encoding='utf-8') as f:
                     lmx_content = f.read().strip()
                 lmx_token_ids = tokenizer.encode_lmx_to_bpe(lmx_content)[:MAX_SEQ_LENGTH]
+                lmx_length = len(lmx_token_ids)
 
                 # Read MIDI
                 score = symusic.Score(midi_path)
@@ -132,6 +134,7 @@ def main():
                 batch_midi_clean.append(clean_ids[:MAX_SEQ_LENGTH])
                 batch_midi_light.append(light_ids[:MAX_SEQ_LENGTH])
                 batch_midi_heavy.append(heavy_ids[:MAX_SEQ_LENGTH])
+                batch_lmx_lengths.append(lmx_length)
 
             except Exception as e:
                 print(f"Skipping {midi_path} due to error: {e}")
@@ -141,7 +144,8 @@ def main():
             "lmx_ids": batch_lmx_ids,
             "midi_clean_ids": batch_midi_clean,
             "midi_light_ids": batch_midi_light,
-            "midi_heavy_ids": batch_midi_heavy
+            "midi_heavy_ids": batch_midi_heavy,
+            "lmx_length": batch_lmx_lengths
         }
 
     # ==========================================

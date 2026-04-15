@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor, DeviceStatsMonitor
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from peft import LoraConfig, get_peft_model
 
@@ -33,7 +33,8 @@ class Seq2SeqTrainingConfig:
     warmup_steps: int = 0
     min_lr_ratio: float = 0.0
 
-    num_steps: int = 1000
+    num_steps: int | None = 1000
+    num_epochs: int | None = None
     max_duration_seconds: float | None = None
 
     early_stopping_patience: int | None = None
@@ -77,8 +78,14 @@ class Seq2SeqTrainingConfig:
             raise ValueError("warmup_steps must be non-negative.")
         if not 0.0 <= self.min_lr_ratio <= 1.0:
             raise ValueError("min_lr_ratio must be between 0 and 1.")
-        if self.num_steps <= 0:
+        if self.num_steps is None and self.num_epochs is None:
+            raise ValueError("Either num_steps or num_epochs must be specified.")
+        if self.num_steps is not None and self.num_epochs is not None:
+            raise ValueError("Only one of num_steps or num_epochs can be specified.")
+        if self.num_steps is not None and self.num_steps <= 0:
             raise ValueError("num_steps must be positive.")
+        if self.num_epochs is not None and self.num_epochs <= 0:
+            raise ValueError("num_epochs must be positive.")
         if self.early_stopping_patience is not None and self.early_stopping_patience <= 0:
             raise ValueError("early_stopping_patience must be positive.")
         if self.early_stopping_patience is not None and self.eval_every == 0:
@@ -349,7 +356,7 @@ def run_seq2seq_training_loop(
         loggers.append(CSVLogger(save_dir=Path(training_config.csv_log_path).parent, name="csv_logs"))
 
     # 7. 設定 Callbacks
-    callbacks = [LearningRateMonitor(logging_interval='step')]
+    callbacks = [LearningRateMonitor(logging_interval='step'), DeviceStatsMonitor()]
     
     if training_config.save_best_checkpoint_path and training_config.eval_every > 0:
         callbacks.append(
@@ -382,7 +389,8 @@ def run_seq2seq_training_loop(
         accelerator=training_config.device if training_config.device != "auto" else "auto",
         devices=1,
         precision=training_config.precision,
-        max_steps=training_config.num_steps,
+        max_steps=training_config.num_steps if training_config.num_steps is not None else -1,
+        max_epochs=training_config.num_epochs,
         val_check_interval=val_check_interval,
         check_val_every_n_epoch=None,
         limit_val_batches=training_config.num_eval_batches if training_config.num_eval_batches else 1.0,

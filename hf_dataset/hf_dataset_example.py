@@ -1,6 +1,6 @@
 from datasets import load_from_disk
 
-ds = load_from_disk('dataset/huggingface')
+ds = load_from_disk('dataset/huggingface_rd_v2')
 print(f"training set size: {len(ds['training'])}")
 # print(f"validation set size: {len(ds['validation'])}")
 # print(f"test set size: {len(ds['test'])}")
@@ -8,4 +8,6 @@ print(f"training set size: {len(ds['training'])}")
 train_data = ds["training"].with_format("torch")
 for data in train_data:
     print(data["input_ids"])
+    print(data["length"])
+    assert len(data["input_ids"]) == data["length"]
     break

@@ -139,6 +139,7 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
             raise ValueError("dataset_path must point to DatasetDict")
 
         self.dataset: HFDataset = dataset_dict[config.split]
+        self.lengths = list(self.dataset["lmx_length"])
 
     def __len__(self):
         return len(self.dataset)
@@ -190,8 +191,6 @@ class LengthBucketBatchSampler(BatchSampler):
         self.shuffle = shuffle
         self.drop_last = drop_last
         self._epoch = 0
-        
-        self._lengths = [len(item["lmx_ids"]) for item in dataset.dataset]
 
     def __iter__(self):
         generator = torch.Generator().manual_seed(self.seed + self._epoch)
@@ -210,7 +209,7 @@ class LengthBucketBatchSampler(BatchSampler):
             pool = indices[start : start + bucket_size]
             
             # sort the pool by length in descending order
-            pool.sort(key=lambda x: self._lengths[x], reverse=True)
+            pool.sort(key=lambda x: self.dataset.lengths[x], reverse=True)
             
             # split the pool into batches
             for i in range(0, len(pool), self.batch_size):
