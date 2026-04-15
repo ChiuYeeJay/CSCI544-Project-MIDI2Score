@@ -76,7 +76,7 @@ training:
   # ===== training =====
   num_steps: null
   num_epochs: 1
-  max_duration_seconds: null
+  max_duration_seconds: 7000
 
   # ===== eval =====
   eval_every: 500

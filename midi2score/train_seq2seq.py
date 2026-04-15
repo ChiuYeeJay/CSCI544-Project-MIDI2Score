@@ -5,6 +5,7 @@ import copy
 from dataclasses import asdict, dataclass, field
 from lightning.pytorch.callbacks import Callback
 from pathlib import Path
+from datetime import timedelta
 
 import torch
 import torch.nn.functional as F
@@ -400,7 +401,7 @@ def run_seq2seq_training_loop(
         accumulate_grad_batches=training_config.accumulate_grad_batches,
         log_every_n_steps=training_config.log_every,
         reload_dataloaders_every_n_epochs=1,
-        max_time=None if not training_config.max_duration_seconds else f"00:00:00:{int(training_config.max_duration_seconds)}"
+        max_time=None if not training_config.max_duration_seconds else timedelta(seconds=training_config.max_duration_seconds)
     )
 
     # 9. 開始訓練
