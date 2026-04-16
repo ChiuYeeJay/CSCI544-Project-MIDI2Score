@@ -11,6 +11,7 @@ model:
     bos_token_id: 1
     eos_token_id: 2
     max_length: 1024
+    positional_encoding: "rope"
   
   encoder:
     d_model: 512
@@ -20,7 +21,7 @@ model:
     dropout: 0.05
     activation: "swiglu"
     max_length: 2048
-    position_encoding_type: "sinusoidal"
+    position_encoding_type: "rope"
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
     src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
@@ -31,7 +32,7 @@ model:
     eos_token_id: 2
 
 data:
-  dataset_path: DATA/huggingface_seq2seq_rd
+  pretrained_decoder_path: DATA/pretrained_decoder/decoder_qkv_rope_best.pt
   split: training
 
   max_source_length: 1024

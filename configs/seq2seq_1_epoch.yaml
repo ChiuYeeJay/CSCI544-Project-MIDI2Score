@@ -7,6 +7,7 @@ model:
     dim_feedforward: 2048
     dropout: 0.05
     activation: swiglu
+    positional_encoding: rope
     pad_token_id: 0
     bos_token_id: 1
     eos_token_id: 2
@@ -20,7 +21,7 @@ model:
     dropout: 0.05
     activation: "swiglu"
     max_length: 2048
-    position_encoding_type: "sinusoidal"
+    position_encoding_type: "rope"
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
     src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
@@ -56,7 +57,7 @@ data:
 
 training:
   # ===== pretrained decoder =====
-  pretrained_decoder_path: best_models/rd/best.pt
+  pretrained_decoder_path: DATA/pretrained_decoder/decoder_qkv_rope_best.pt
 
   # ===== batch & optimizer =====
   batch_size: 16
