@@ -115,7 +115,7 @@ class Seq2SeqTrainingResult:
 
 def load_pretrained_decoder(seq2seq_model, checkpoint_path):
     """在套用 PEFT 前呼叫此函數載入權重"""
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     pretrained_dict = ckpt["model_state"] if "model_state" in ckpt else ckpt
 
     model_dict = seq2seq_model.state_dict()
@@ -340,7 +340,7 @@ def run_seq2seq_training_loop(
             
         # 5.2 Unfreeze cross_attention in Decoder
         for name, p in model.model.decoder.named_parameters():
-            if "cross_attn" in name or "norm3" in name:
+            if "cross_attn" in name:
                 p.requires_grad = True
         
         print("\n==== TRAINABLE PARAMS ====")

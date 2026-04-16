@@ -57,7 +57,7 @@ data:
 
 training:
   # ===== pretrained decoder =====
-  pretrained_decoder_path: DATA/pretrained_decoder/decoder_qkv_rope_best.pt
+  pretrained_decoder_path: DATA/qkv_rope_normfix.pt
 
   # ===== batch & optimizer =====
   batch_size: 16

@@ -289,12 +289,12 @@ class TransformerDecoderLayer(nn.Module):
             dropout=dropout,
             activation=activation,
         )
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
-        self.norm1 = build_norm(d_model)
-        self.norm2 = build_norm(d_model)
-        self.norm3 = build_norm(d_model)
+        self.self_attn_dropout = nn.Dropout(dropout)
+        self.cross_attn_dropout = nn.Dropout(dropout)
+        self.ffn_dropout = nn.Dropout(dropout)
+        self.self_attn_norm = build_norm(d_model)
+        self.cross_attn_norm = build_norm(d_model)
+        self.ffn_norm = build_norm(d_model)
 
     def forward(
         self,
@@ -305,25 +305,23 @@ class TransformerDecoderLayer(nn.Module):
         memory_padding_mask: Tensor | None = None,
     ) -> Tensor:
         x = tgt
-        residual_input = self.norm1(x)
+        self_attn_input = self.self_attn_norm(x)
         self_attn_output = self.self_attn(
-            residual_input,
+            self_attn_input,
             tgt_padding_mask=tgt_padding_mask,
         )
-        x = x + self.dropout1(self_attn_output)
+        x = x + self.self_attn_dropout(self_attn_output)
         if memory is not None:
-            cross_attn_input = self.norm3(x)
+            cross_attn_input = self.cross_attn_norm(x)
             cross_attn_output = self.cross_attn(
                 cross_attn_input,
                 memory=memory,
                 memory_padding_mask=memory_padding_mask,
             )
-            x = x + self.dropout2(cross_attn_output)
-            ff_input = self.norm2(x)
-        else:
-            ff_input = self.norm2(x)
+            x = x + self.cross_attn_dropout(cross_attn_output)
+        ff_input = self.ffn_norm(x)
         ff_output = self.feedforward(ff_input)
-        x = x + self.dropout3(ff_output)
+        x = x + self.ffn_dropout(ff_output)
         return x
 
 
