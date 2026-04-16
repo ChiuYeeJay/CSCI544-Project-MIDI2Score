@@ -320,18 +320,28 @@ def run_seq2seq_training_loop(
         peft_config = LoraConfig(
             r=training_config.lora_r,
             lora_alpha=training_config.lora_alpha,
-            target_modules="all-linear", # 自動抓取 Decoder 中所有的 nn.Linear
+            target_modules=[
+                "self_attn.q_proj", 
+                "self_attn.k_proj", 
+                "self_attn.v_proj", 
+                "self_attn.out_proj", 
+                "feedforward.linear1", 
+                "feedforward.linear2",
+            ],
             lora_dropout=training_config.lora_dropout,
             bias="none",
         )
-        # 這裡直接覆蓋 base model 內的 decoder 為 PeftModel
         model.model.decoder = get_peft_model(model.model.decoder, peft_config)
 
-        # 5. 設定 Freezing 邏輯
-        # PEFT 預設會將原本的 Decoder base_model 凍結，只開啟 lora 的 gradient
-        # 但我們需要手動確保 Encoder 的狀態符合需求
+        # 5. Unfreezing
+        # 5.1 Unfreeze Encoder
         for p in model.model.encoder.parameters():
             p.requires_grad = True
+            
+        # 5.2 Unfreeze cross_attention in Decoder
+        for name, p in model.model.decoder.named_parameters():
+            if "cross_attn" in name or "norm3" in name:
+                p.requires_grad = True
         
         print("\n==== TRAINABLE PARAMS ====")
         model.model.decoder.print_trainable_parameters()

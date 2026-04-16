@@ -312,14 +312,14 @@ class TransformerDecoderLayer(nn.Module):
         )
         x = x + self.dropout1(self_attn_output)
         if memory is not None:
-            cross_attn_input = self.norm2(x)
+            cross_attn_input = self.norm3(x)
             cross_attn_output = self.cross_attn(
                 cross_attn_input,
                 memory=memory,
                 memory_padding_mask=memory_padding_mask,
             )
             x = x + self.dropout2(cross_attn_output)
-            ff_input = self.norm3(x)
+            ff_input = self.norm2(x)
         else:
             ff_input = self.norm2(x)
         ff_output = self.feedforward(ff_input)
