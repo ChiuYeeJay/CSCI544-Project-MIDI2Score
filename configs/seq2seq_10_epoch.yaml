@@ -20,7 +20,7 @@ model:
     dim_feedforward: 2048
     dropout: 0.05
     activation: "swiglu"
-    max_length: 2048
+    max_length: 1024
     position_encoding_type: "rope"
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
@@ -60,8 +60,8 @@ training:
   pretrained_decoder_path: DATA/qkv_rope_normfix.pt
 
   # ===== batch & optimizer =====
-  batch_size: 16
-  accumulate_grad_batches: 8
+  batch_size: 32
+  accumulate_grad_batches: 4
   precision: bf16-mixed
   learning_rate: 0.0003
   weight_decay: 0.1
@@ -71,12 +71,12 @@ training:
 
   # ===== scheduler =====
   scheduler: cosine
-  warmup_steps: 400
+  warmup_steps: 100
   min_lr_ratio: 0.1
 
   # ===== training =====
   num_steps: null
-  num_epochs: 1
+  num_epochs: 10
   max_duration_seconds: 7000
 
   # ===== eval =====
@@ -98,7 +98,7 @@ training:
 
   # ===== logs =====
   csv_log_path: logs/seq2seq.csv
-  tensorboard_log_dir: logs/tensorboard/seq2seq
+  tensorboard_log_dir: logs/tensorboard
 
   # ===== LoRA strategy =====
   use_lora: true
