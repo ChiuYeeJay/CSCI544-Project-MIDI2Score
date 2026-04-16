@@ -215,7 +215,7 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
         if self.training_config.scheduler == "none" and self.training_config.warmup_steps == 0:
             return optimizer
 
-        total_steps = self.training_config.num_steps
+        total_steps = int(self.trainer.estimated_stepping_batches)
         warmup_steps = self.training_config.warmup_steps
         min_lr_ratio = self.training_config.min_lr_ratio
         scheduler_name = self.training_config.scheduler
