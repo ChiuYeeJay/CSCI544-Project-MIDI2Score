@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import time
 import copy
@@ -39,7 +40,7 @@ class Seq2SeqTrainingConfig:
     label_smoothing: float = 0.0
 
     scheduler: str = "none"   # none / linear / cosine
-    warmup_steps: int = 0
+    warmup_ratio: float = 0.0
     min_lr_ratio: float = 0.0
 
     num_steps: int | None = 1000
@@ -84,8 +85,8 @@ class Seq2SeqTrainingConfig:
             raise ValueError("label_smoothing must be in [0, 1).")
         if self.scheduler not in {"none", "linear", "cosine"}:
             raise ValueError("scheduler must be one of none/linear/cosine.")
-        if self.warmup_steps < 0:
-            raise ValueError("warmup_steps must be non-negative.")
+        if not 0.0 <= self.warmup_ratio <= 1.0:
+            raise ValueError("warmup_ratio must be between 0 and 1.")
         if not 0.0 <= self.min_lr_ratio <= 1.0:
             raise ValueError("min_lr_ratio must be between 0 and 1.")
         if self.num_steps is None and self.num_epochs is None:
@@ -231,13 +232,20 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
             weight_decay=self.training_config.weight_decay,
         )
 
-        if self.training_config.scheduler == "none" and self.training_config.warmup_steps == 0:
-            return optimizer
-
         total_steps = int(self.trainer.estimated_stepping_batches)
-        warmup_steps = self.training_config.warmup_steps
+        print(f"Estimated total training steps: {total_steps}")
+
+        warmup_steps = max(1, math.ceil(total_steps * self.training_config.warmup_ratio))
+        print(
+            f"Warmup ratio: {self.training_config.warmup_ratio:.4f} -> "
+            f"warmup steps: {warmup_steps}"
+        )
+
         min_lr_ratio = self.training_config.min_lr_ratio
         scheduler_name = self.training_config.scheduler
+
+        if scheduler_name == "none" and warmup_steps == 0:
+            return optimizer
 
         if scheduler_name == "none":
             scheduler = get_constant_schedule_with_warmup(

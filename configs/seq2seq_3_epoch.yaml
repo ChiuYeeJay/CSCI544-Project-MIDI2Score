@@ -20,7 +20,7 @@ model:
     dim_feedforward: 2048
     dropout: 0.05
     activation: "swiglu"
-    max_length: 1024
+    max_length: 1536
     position_encoding_type: "rope"
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
@@ -35,7 +35,7 @@ data:
   dataset_path: DATA/huggingface_seq2seq_rd
   split: training
 
-  max_source_length: 1024
+  max_source_length: 1536
   max_target_length: 1024
 
   tokenizer_path: DATA/tokenizer_rd.json
@@ -60,8 +60,8 @@ training:
   pretrained_decoder_path: DATA/qkv_rope_normfix.pt
 
   # ===== batch & optimizer =====
-  batch_size: 64
-  accumulate_grad_batches: 2
+  batch_size: 32
+  accumulate_grad_batches: 4
   precision: bf16-mixed
   learning_rate: 0.0003
   weight_decay: 0.1
@@ -71,7 +71,7 @@ training:
 
   # ===== scheduler =====
   scheduler: cosine
-  warmup_steps: 100
+  warmup_ratio: 0.05
   min_lr_ratio: 0.1
 
   # ===== training =====

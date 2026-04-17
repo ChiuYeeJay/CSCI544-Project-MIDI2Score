@@ -73,7 +73,7 @@ training:
 
   # ===== scheduler =====
   scheduler: linear
-  warmup_steps: 100
+  warmup_ratio: 0.05
   min_lr_ratio: 0.1
 
   # ===== training =====
