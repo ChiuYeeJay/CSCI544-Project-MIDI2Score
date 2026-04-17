@@ -12,11 +12,17 @@ from datetime import timedelta
 import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LambdaLR
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor, DeviceStatsMonitor
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from peft import LoraConfig, get_peft_model
+from transformers.optimization import (
+    get_constant_schedule_with_warmup,
+    get_cosine_schedule_with_warmup,
+    get_linear_schedule_with_warmup,
+    get_polynomial_decay_schedule_with_warmup,
+    get_cosine_with_min_lr_schedule_with_warmup,
+)
 
 from midi2score.data_seq2seq import Seq2SeqDataConfig, build_seq2seq_dataloader
 from midi2score.model_seq2seq import Seq2SeqConfig, TransformerForConditionalGeneration
@@ -44,7 +50,7 @@ class Seq2SeqTrainingConfig:
     early_stopping_min_delta: float = 0.0
 
     log_every: int = 10
-    val_check_interval: int | float | None = None
+    val_check_interval: int | float = 50
     check_val_every_n_epoch: int | None = None
     num_eval_batches: int | None = None
 
@@ -92,13 +98,17 @@ class Seq2SeqTrainingConfig:
             raise ValueError("num_epochs must be positive.")
         if self.early_stopping_patience is not None and self.early_stopping_patience <= 0:
             raise ValueError("early_stopping_patience must be positive.")
-        if self.early_stopping_patience is not None and self.val_check_interval == 0:
-            raise ValueError("early_stopping_patience requires val_check_interval > 0.")
-        if self.val_check_interval is not None and self.val_check_interval <= 0:
-            raise ValueError("val_check_interval must be positive.")
+        if isinstance(self.val_check_interval, int):
+            if self.val_check_interval <= 0:
+                raise ValueError("val_check_interval must be a positive integer.")
+        elif isinstance(self.val_check_interval, float):
+            if not (0.0 < self.val_check_interval <= 1.0):
+                raise ValueError("Float val_check_interval must be in (0, 1].")
+        else:
+            raise TypeError("val_check_interval must be an int or a float.")
         if self.check_val_every_n_epoch is not None and self.check_val_every_n_epoch <= 0:
             raise ValueError("check_val_every_n_epoch must be positive.")
-        if self.val_check_interval < 1.0 and self.check_val_every_n_epoch is None:
+        if isinstance(self.val_check_interval, float) and self.check_val_every_n_epoch is None:
             raise ValueError("If val_check_interval is a fraction, check_val_every_n_epoch must be set.")
         if self.num_eval_batches is not None and self.num_eval_batches <= 0:
             raise ValueError("num_eval_batches must be positive.")
@@ -229,26 +239,40 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
         min_lr_ratio = self.training_config.min_lr_ratio
         scheduler_name = self.training_config.scheduler
 
-        def lr_lambda(step: int) -> float:
-            current_step = max(step, 1)
-
-            if warmup_steps > 0 and current_step <= warmup_steps:
-                return current_step / warmup_steps
-
-            if scheduler_name == "none":
-                return 1.0
-
-            decay_start = max(warmup_steps, 1)
-            decay_steps = max(total_steps - decay_start, 1)
-            progress = min(max((current_step - decay_start) / decay_steps, 0.0), 1.0)
-
-            if scheduler_name == "linear":
-                return 1.0 - progress * (1.0 - min_lr_ratio)
-
-            cosine = 0.5 * (1.0 + torch.cos(torch.tensor(progress * torch.pi))).item()
-            return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
-
-        scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+        if scheduler_name == "none":
+            scheduler = get_constant_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=warmup_steps,
+            )
+        elif scheduler_name == "linear":
+            if min_lr_ratio > 0.0:
+                scheduler = get_polynomial_decay_schedule_with_warmup(
+                    optimizer,
+                    num_warmup_steps=warmup_steps,
+                    num_training_steps=total_steps,
+                    lr_end=self.training_config.learning_rate * min_lr_ratio,
+                    power=1.0,
+                )
+            else:
+                scheduler = get_linear_schedule_with_warmup(
+                    optimizer,
+                    num_warmup_steps=warmup_steps,
+                    num_training_steps=total_steps,
+                )
+        else:
+            if min_lr_ratio > 0.0:
+                scheduler = get_cosine_with_min_lr_schedule_with_warmup(
+                    optimizer,
+                    num_warmup_steps=warmup_steps,
+                    num_training_steps=total_steps,
+                    min_lr_rate=min_lr_ratio,
+                )
+            else:
+                scheduler = get_cosine_schedule_with_warmup(
+                    optimizer,
+                    num_warmup_steps=warmup_steps,
+                    num_training_steps=total_steps,
+                )
 
         return {
             "optimizer": optimizer,
@@ -311,8 +335,9 @@ def run_seq2seq_training_loop(
     train_loader = build_seq2seq_dataloader(data_config, batch_size=training_config.batch_size)
     
     val_loader = None
+    has_validation = training_config.val_check_interval > 0
 
-    if training_config.val_check_interval > 0:
+    if has_validation:
         val_data_config = copy.deepcopy(data_config)
         val_data_config.split = "validation"
         val_loader = build_seq2seq_dataloader(val_data_config, batch_size=training_config.batch_size, shuffle=False)
@@ -378,7 +403,7 @@ def run_seq2seq_training_loop(
     # 7. 設定 Callbacks
     callbacks = [LearningRateMonitor(logging_interval='step'), DeviceStatsMonitor()]
     
-    if training_config.save_best_checkpoint_path and training_config.val_check_interval > 0:
+    if training_config.save_best_checkpoint_path and has_validation:
         callbacks.append(
             ModelCheckpoint(
                 dirpath=Path(training_config.save_best_checkpoint_path).parent,
@@ -389,7 +414,7 @@ def run_seq2seq_training_loop(
             )
         )
 
-    if training_config.early_stopping_patience is not None:
+    if training_config.early_stopping_patience is not None and has_validation:
         callbacks.append(
             EarlyStopping(
                 monitor="val/loss",
@@ -449,10 +474,7 @@ def run_seq2seq_training_loop(
     if best_ckpt_path and training_config.save_best_checkpoint_path:
         target_path = Path(training_config.save_best_checkpoint_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(best_ckpt_path, target_path)
-
-        if Path(best_ckpt_path).resolve() != target_path.resolve():
-            Path(best_ckpt_path).unlink(missing_ok=True)
+        shutil.move(best_ckpt_path, target_path)
 
         cleanup_root = target_path.parent
         for dirpath, dirnames, filenames in os.walk(cleanup_root, topdown=False):

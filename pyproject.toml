@@ -21,6 +21,7 @@ dependencies = [
     "symusic>=0.6.0",
     "miditok>=3.0.6.post1",
     "music21>=9.9.1",
+    "transformers>=5.5.4",
 ]
 
 [[tool.uv.index]]
