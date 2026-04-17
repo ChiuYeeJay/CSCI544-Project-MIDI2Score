@@ -11,7 +11,7 @@ model:
     bos_token_id: 1
     eos_token_id: 2
     max_length: 1024
-    positional_encoding: "rope"
+    positional_encoding: sinusoidal
   
   encoder:
     d_model: 512
@@ -21,7 +21,7 @@ model:
     dropout: 0.05
     activation: "swiglu"
     max_length: 1024
-    position_encoding_type: "rope"
+    position_encoding_type: sinusoidal
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
     src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]

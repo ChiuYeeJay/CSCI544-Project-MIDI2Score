@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from lightning.pytorch.callbacks import Callback
 from pathlib import Path
 from datetime import timedelta
+from typing import Literal
 
 import torch
 import torch.nn.functional as F
@@ -27,6 +28,8 @@ from transformers.optimization import (
 
 from midi2score.data_seq2seq import Seq2SeqDataConfig, build_seq2seq_dataloader
 from midi2score.model_seq2seq import Seq2SeqConfig, TransformerForConditionalGeneration
+
+TrainingMode = Literal["full_ft", "lora", "end_to_end"]
 
 @dataclass(slots=True)
 class Seq2SeqTrainingConfig:
@@ -64,7 +67,8 @@ class Seq2SeqTrainingConfig:
     csv_log_path: str | None = None
     tensorboard_log_dir: str | None = None
 
-    use_lora: bool = True
+    training_mode: TrainingMode = "lora"
+    decoder_pretrained_learning_rate: float | None = None
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
@@ -115,6 +119,14 @@ class Seq2SeqTrainingConfig:
             raise ValueError("num_eval_batches must be positive.")
         if self.resume_checkpoint_path is not None and not Path(self.resume_checkpoint_path).exists():
             raise ValueError(f"resume_checkpoint_path does not exist: {self.resume_checkpoint_path}")
+        if self.training_mode not in {"full_ft", "lora", "end_to_end"}:
+            raise ValueError("training_mode must be one of full_ft/lora/end_to_end.")
+        if self.decoder_pretrained_learning_rate is not None and self.decoder_pretrained_learning_rate <= 0:
+            raise ValueError("decoder_pretrained_learning_rate must be positive.")
+        if self.training_mode == "end_to_end" and self.pretrained_decoder_path is not None:
+            raise ValueError("pretrained_decoder_path must be null in end_to_end mode.")
+        if self.training_mode == "full_ft" and self.pretrained_decoder_path is None:
+            raise ValueError("pretrained_decoder_path is required in full_ft mode.")
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -171,6 +183,49 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
     def __init__(self, config: Seq2SeqConfig, training_config: Seq2SeqTrainingConfig):
         super().__init__(config)
         self.training_config = training_config
+        self.pretrained_decoder_parameter_names: set[str] = set()
+
+    def set_pretrained_decoder_parameter_names(self, parameter_names: list[str]) -> None:
+        self.pretrained_decoder_parameter_names = set(parameter_names)
+
+    def _build_optimizer_parameters(self):
+        trainable_named_parameters = [(name, p) for name, p in self.named_parameters() if p.requires_grad]
+
+        if (
+            self.training_config.training_mode != "full_ft"
+            or self.training_config.decoder_pretrained_learning_rate is None
+            or not self.pretrained_decoder_parameter_names
+        ):
+            return [p for _, p in trainable_named_parameters]
+
+        pretrained_group = []
+        other_group = []
+
+        for name, param in trainable_named_parameters:
+            if name in self.pretrained_decoder_parameter_names:
+                pretrained_group.append(param)
+            else:
+                other_group.append(param)
+
+        if not pretrained_group:
+            return [p for _, p in trainable_named_parameters]
+
+        print(
+            "full_ft optimizer groups -> "
+            f"pretrained_decoder: {len(pretrained_group)} params @ lr={self.training_config.decoder_pretrained_learning_rate}, "
+            f"others: {len(other_group)} params @ lr={self.training_config.learning_rate}"
+        )
+
+        optimizer_parameters = []
+        if other_group:
+            optimizer_parameters.append({"params": other_group})
+        optimizer_parameters.append(
+            {
+                "params": pretrained_group,
+                "lr": self.training_config.decoder_pretrained_learning_rate,
+            }
+        )
+        return optimizer_parameters
 
     def training_step(self, batch, batch_idx):
         loss, logits = self.forward(
@@ -224,10 +279,10 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        trainable_parameters = [p for p in self.parameters() if p.requires_grad]
+        optimizer_parameters = self._build_optimizer_parameters()
         
         optimizer = AdamW(
-            trainable_parameters,
+            optimizer_parameters,
             lr=self.training_config.learning_rate,
             weight_decay=self.training_config.weight_decay,
         )
@@ -307,6 +362,16 @@ def _validate_setup(model_config: Seq2SeqConfig, data_config: Seq2SeqDataConfig)
             )
 
 
+def _print_trainable_parameter_stats(model: torch.nn.Module) -> None:
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    ratio = 100.0 * trainable_params / max(total_params, 1)
+    print(
+        f"trainable params: {trainable_params:,} || "
+        f"all params: {total_params:,} || trainable%: {ratio:.4f}"
+    )
+
+
 # =========================
 # Curriculum Learning Callback
 # =========================
@@ -352,13 +417,22 @@ def run_seq2seq_training_loop(
 
     # 2. 初始化模型
     model = LitSeq2Seq(model_config, training_config)
+    print(f"\n==== TRAINING MODE: {training_config.training_mode} ====")
+
+    loaded_pretrained_decoder_keys: list[str] = []
 
     # 3. 載入 Pretrain Decoder 參數（必須在掛 LoRA 之前載入）
-    if training_config.pretrained_decoder_path is not None:
-        load_pretrained_decoder(model, training_config.pretrained_decoder_path)
+    if (
+        training_config.training_mode in {"full_ft", "lora"}
+        and training_config.pretrained_decoder_path is not None
+    ):
+        loaded_pretrained_decoder_keys, _ = load_pretrained_decoder(
+            model,
+            training_config.pretrained_decoder_path,
+        )
 
-    # 4. 依設定決定是否對 Decoder 套用 PEFT LoRA
-    if training_config.use_lora:
+    # 4. 依設定決定訓練模式
+    if training_config.training_mode == "lora":
         peft_config = LoraConfig(
             r=training_config.lora_r,
             lora_alpha=training_config.lora_alpha,
@@ -374,13 +448,13 @@ def run_seq2seq_training_loop(
             bias="none",
         )
         model.model.decoder = get_peft_model(model.model.decoder, peft_config)
+        model.set_pretrained_decoder_parameter_names([])
 
-        # 5. Unfreezing
-        # 5.1 Unfreeze Encoder
+        # 4.1 Unfreeze Encoder
         for p in model.model.encoder.parameters():
             p.requires_grad = True
             
-        # 5.2 Unfreeze cross_attention in Decoder
+        # 4.2 Unfreeze cross_attention in Decoder
         for name, p in model.model.decoder.named_parameters():
             if "cross_attn" in name:
                 p.requires_grad = True
@@ -388,18 +462,29 @@ def run_seq2seq_training_loop(
         print("\n==== TRAINABLE PARAMS ====")
         model.model.decoder.print_trainable_parameters()
 
+    elif training_config.training_mode == "full_ft":
+        for p in model.parameters():
+            p.requires_grad = True
+
+        model.set_pretrained_decoder_parameter_names(loaded_pretrained_decoder_keys)
+
+        print("\n==== TRAINABLE PARAMS ====")
+        _print_trainable_parameter_stats(model)
+
+        if training_config.decoder_pretrained_learning_rate is not None:
+            print(
+                "full_ft pretrained decoder lr: "
+                f"{training_config.decoder_pretrained_learning_rate}"
+            )
+
     else:
         for p in model.parameters():
             p.requires_grad = True
+
+        model.set_pretrained_decoder_parameter_names([])
         
         print("\n==== TRAINABLE PARAMS ====")
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        total_params = sum(p.numel() for p in model.parameters())
-        ratio = 100.0 * trainable_params / max(total_params, 1)
-        print(
-            f"trainable params: {trainable_params:,} || "
-            f"all params: {total_params:,} || trainable%: {ratio:.4f}"
-        )
+        _print_trainable_parameter_stats(model)
     
     # 6. 設定 PyTorch Lightning Loggers
     loggers = []

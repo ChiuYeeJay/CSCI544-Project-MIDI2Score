@@ -20,7 +20,7 @@ model:
     dim_feedforward: 2048
     dropout: 0.05
     activation: "swiglu"
-    max_length: 1536
+    max_length: 1024
     position_encoding_type: "rope"
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
@@ -35,7 +35,7 @@ data:
   dataset_path: DATA/huggingface_seq2seq_rd
   split: training
 
-  max_source_length: 1536
+  max_source_length: 1024
   max_target_length: 1024
 
   tokenizer_path: DATA/tokenizer_rd.json
@@ -71,7 +71,7 @@ training:
 
   # ===== scheduler =====
   scheduler: cosine
-  warmup_ratio: 0.05
+  warmup_ratio: 0.02
   min_lr_ratio: 0.1
 
   # ===== training =====
@@ -101,8 +101,9 @@ training:
   csv_log_path: logs/seq2seq.csv
   tensorboard_log_dir: logs/tensorboard
 
-  # ===== LoRA strategy =====
-  use_lora: true
+  # ===== Training strategy =====
+  training_mode: lora
+  decoder_pretrained_learning_rate: null
   lora_r: 16
   lora_alpha: 32
   lora_dropout: 0.05
