@@ -203,3 +203,93 @@ class TransformerForConditionalGeneration(nn.Module):
         )
 
         return loss, logits
+    
+    def generate(
+        self,
+        encoder_input_tokens: Tensor,
+        encoder_padding_mask: Tensor | None = None,
+        max_length: int | None = None,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+    ):
+        """
+        Autoregressive generation for seq2seq model.
+
+        Args:
+            encoder_input_tokens: [B, T_src, ...]
+            encoder_padding_mask: [B, T_src]
+            max_length: max generation length
+            temperature: sampling temperature
+            top_k: optional top-k sampling
+
+        Returns:
+            generated_tokens: [B, T_gen]
+        """
+        self.eval()
+
+        device = encoder_input_tokens.device
+        config = self.config.decoder_config
+
+        if max_length is None:
+            max_length = config.max_length
+
+        batch_size = encoder_input_tokens.size(0)
+
+        bos_token_id = config.bos_token_id
+        eos_token_id = config.eos_token_id
+        pad_token_id = config.pad_token_id
+
+        # ===== encoder =====
+        memory = self.model.encoder(
+            encoder_input_tokens,
+            padding_mask=encoder_padding_mask,
+        )
+
+        # ===== init decoder input =====
+        generated = torch.full(
+            (batch_size, 1),
+            bos_token_id,
+            dtype=torch.long,
+            device=device,
+        )
+
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
+        # ===== autoregressive decoding =====
+        for _ in range(max_length):
+
+            logits = self.model.decoder(
+                generated,
+                memory=memory,
+                memory_padding_mask=encoder_padding_mask,
+            )
+
+            next_token_logits = logits[:, -1, :]  # [B, vocab]
+
+            # ===== temperature =====
+            if temperature != 1.0:
+                next_token_logits = next_token_logits / temperature
+
+            # ===== top-k sampling =====
+            if top_k is not None:
+                top_k = min(top_k, next_token_logits.size(-1))
+                values, indices = torch.topk(next_token_logits, top_k)
+                probs = torch.zeros_like(next_token_logits).scatter_(1, indices, torch.softmax(values, dim=-1))
+            else:
+                probs = torch.softmax(next_token_logits, dim=-1)
+
+            next_tokens = torch.multinomial(probs, num_samples=1)  # [B,1]
+
+            # ===== 已完成序列不再生成 =====
+            next_tokens = next_tokens.masked_fill(finished.unsqueeze(-1), pad_token_id)
+
+            generated = torch.cat([generated, next_tokens], dim=1)
+
+            # ===== 更新 finished 状态 =====
+            finished = finished | (next_tokens.squeeze(-1) == eos_token_id)
+
+            # ===== 全部结束则提前停止 =====
+            if finished.all():
+                break
+
+        return generated
