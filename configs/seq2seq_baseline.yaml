@@ -77,12 +77,13 @@ training:
   min_lr_ratio: 0.1
 
   # ===== training =====
-  num_steps: 500
+  num_steps: 200
   num_epochs: null
   max_duration_seconds: null
 
   # ===== eval =====
-  eval_every: 50
+  val_check_interval: 50
+  check_val_every_n_epoch: null
   num_eval_batches: 8
 
   early_stopping_patience: null

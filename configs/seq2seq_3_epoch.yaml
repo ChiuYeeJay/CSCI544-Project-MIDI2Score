@@ -60,8 +60,8 @@ training:
   pretrained_decoder_path: DATA/qkv_rope_normfix.pt
 
   # ===== batch & optimizer =====
-  batch_size: 32
-  accumulate_grad_batches: 4
+  batch_size: 64
+  accumulate_grad_batches: 2
   precision: bf16-mixed
   learning_rate: 0.0003
   weight_decay: 0.1
@@ -76,12 +76,12 @@ training:
 
   # ===== training =====
   num_steps: null
-  num_epochs: 10
-  max_duration_seconds: 7000
+  num_epochs: 3
+  max_duration_seconds: 3600
 
   # ===== eval =====
-  val_check_interval: 500
-  check_val_every_n_epoch: null
+  val_check_interval: 0.5
+  check_val_every_n_epoch: 1
   num_eval_batches: 16
 
   early_stopping_patience: null

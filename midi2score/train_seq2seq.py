@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import time
 import copy
+import shutil
 from dataclasses import asdict, dataclass, field
 from lightning.pytorch.callbacks import Callback
 from pathlib import Path
@@ -42,7 +44,8 @@ class Seq2SeqTrainingConfig:
     early_stopping_min_delta: float = 0.0
 
     log_every: int = 10
-    eval_every: int = 0
+    val_check_interval: int | float | None = None
+    check_val_every_n_epoch: int | None = None
     num_eval_batches: int | None = None
 
     device: str = "auto"
@@ -89,8 +92,14 @@ class Seq2SeqTrainingConfig:
             raise ValueError("num_epochs must be positive.")
         if self.early_stopping_patience is not None and self.early_stopping_patience <= 0:
             raise ValueError("early_stopping_patience must be positive.")
-        if self.early_stopping_patience is not None and self.eval_every == 0:
-            raise ValueError("early_stopping_patience requires eval_every > 0.")
+        if self.early_stopping_patience is not None and self.val_check_interval == 0:
+            raise ValueError("early_stopping_patience requires val_check_interval > 0.")
+        if self.val_check_interval is not None and self.val_check_interval <= 0:
+            raise ValueError("val_check_interval must be positive.")
+        if self.check_val_every_n_epoch is not None and self.check_val_every_n_epoch <= 0:
+            raise ValueError("check_val_every_n_epoch must be positive.")
+        if self.val_check_interval < 1.0 and self.check_val_every_n_epoch is None:
+            raise ValueError("If val_check_interval is a fraction, check_val_every_n_epoch must be set.")
         if self.num_eval_batches is not None and self.num_eval_batches <= 0:
             raise ValueError("num_eval_batches must be positive.")
         if self.resume_checkpoint_path is not None and not Path(self.resume_checkpoint_path).exists():
@@ -303,7 +312,7 @@ def run_seq2seq_training_loop(
     
     val_loader = None
 
-    if training_config.eval_every > 0:
+    if training_config.val_check_interval > 0:
         val_data_config = copy.deepcopy(data_config)
         val_data_config.split = "validation"
         val_loader = build_seq2seq_dataloader(val_data_config, batch_size=training_config.batch_size, shuffle=False)
@@ -369,7 +378,7 @@ def run_seq2seq_training_loop(
     # 7. 設定 Callbacks
     callbacks = [LearningRateMonitor(logging_interval='step'), DeviceStatsMonitor()]
     
-    if training_config.save_best_checkpoint_path and training_config.eval_every > 0:
+    if training_config.save_best_checkpoint_path and training_config.val_check_interval > 0:
         callbacks.append(
             ModelCheckpoint(
                 dirpath=Path(training_config.save_best_checkpoint_path).parent,
@@ -394,16 +403,14 @@ def run_seq2seq_training_loop(
         callbacks.append(CurriculumLearningCallback())
 
     # 8. 建立 Lightning Trainer
-    val_check_interval = training_config.eval_every if training_config.eval_every > 0 else None
-    
     trainer = L.Trainer(
         accelerator=training_config.device if training_config.device != "auto" else "auto",
         devices=1,
         precision=training_config.precision,
         max_steps=training_config.num_steps if training_config.num_steps is not None else -1,
         max_epochs=training_config.num_epochs,
-        val_check_interval=val_check_interval,
-        check_val_every_n_epoch=None,
+        val_check_interval=training_config.val_check_interval,
+        check_val_every_n_epoch=training_config.check_val_every_n_epoch,
         limit_val_batches=training_config.num_eval_batches if training_config.num_eval_batches else 1.0,
         gradient_clip_val=training_config.grad_clip_norm,
         logger=loggers if loggers else False,
@@ -438,6 +445,24 @@ def run_seq2seq_training_loop(
         if isinstance(cb, L.pytorch.callbacks.ModelCheckpoint):
             best_ckpt_path = cb.best_model_path
             best_val_loss = cb.best_model_score.item() if cb.best_model_score else None
+
+    if best_ckpt_path and training_config.save_best_checkpoint_path:
+        target_path = Path(training_config.save_best_checkpoint_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(best_ckpt_path, target_path)
+
+        if Path(best_ckpt_path).resolve() != target_path.resolve():
+            Path(best_ckpt_path).unlink(missing_ok=True)
+
+        cleanup_root = target_path.parent
+        for dirpath, dirnames, filenames in os.walk(cleanup_root, topdown=False):
+            current_dir = Path(dirpath)
+            if current_dir == cleanup_root:
+                continue
+            if not dirnames and not filenames:
+                current_dir.rmdir()
+
+        best_ckpt_path = str(target_path)
 
     stopped_due_to_early_stopping = any(
         isinstance(cb, L.pytorch.callbacks.EarlyStopping) and trainer.should_stop 
