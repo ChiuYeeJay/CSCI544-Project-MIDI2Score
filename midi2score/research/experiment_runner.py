@@ -12,7 +12,8 @@ import yaml
 
 from midi2score.config import load_seq2seq_config
 from midi2score.data_seq2seq import Seq2SeqDataConfig
-from midi2score.model_seq2seq import Seq2SeqConfig
+from midi2score.model_decoder import DecoderLanguageModelConfig
+from midi2score.model_seq2seq import EncoderConfig
 from midi2score.train_seq2seq import (
     Seq2SeqTrainingConfig,
     run_seq2seq_training_loop,
@@ -29,7 +30,10 @@ from midi2score.research.git_utils import (
 _EXPERIMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 _ALLOWED_OVERRIDE_FIELDS = {
-    "model": {field.name for field in fields(Seq2SeqConfig)},
+    "model": {
+        "encoder": {field.name for field in fields(EncoderConfig)},
+        "decoder": {field.name for field in fields(DecoderLanguageModelConfig)},
+    },
     "data": {field.name for field in fields(Seq2SeqDataConfig)},
     "training": {field.name for field in fields(Seq2SeqTrainingConfig)},
 }
@@ -43,7 +47,7 @@ class ExperimentPaths:
     config_path: Path
     checkpoint_path: Path
     best_checkpoint_path: Path
-    csv_log_path: Path
+    log_dir: Path
     tensorboard_log_dir: Path
     summary_path: Path
 
@@ -170,7 +174,8 @@ def run_research_experiment(
         "checkpoint_path": str(paths.checkpoint_path.resolve()),
         "best_checkpoint_path": str(paths.best_checkpoint_path.resolve()),
 
-        "csv_log_path": str(paths.csv_log_path.resolve()),
+        "log_dir": str(paths.log_dir.resolve()),
+        "csv_log_dir": str((paths.log_dir / "csv").resolve()),
         "tensorboard_log_dir": str(paths.tensorboard_log_dir.resolve()),
 
         "summary_path": str(paths.summary_path.resolve()),
@@ -201,12 +206,13 @@ def run_research_experiment(
 # helpers
 # =========================
 def _build_experiment_paths(output_root: Path, experiment_id: str):
+    log_dir = output_root / "logs/research" / experiment_id
     return ExperimentPaths(
         config_path=output_root / "configs/research" / f"{experiment_id}.yaml",
         checkpoint_path=output_root / "artifacts/research" / experiment_id / "latest.pt",
         best_checkpoint_path=output_root / "artifacts/research" / experiment_id / "best.pt",
-        csv_log_path=output_root / "logs/research" / f"{experiment_id}.csv",
-        tensorboard_log_dir=output_root / "logs/tensorboard/research" / experiment_id,
+        log_dir=log_dir,
+        tensorboard_log_dir=log_dir / "tensorboard",
         summary_path=output_root / "artifacts/research" / experiment_id / "summary.json",
     )
 
@@ -230,20 +236,57 @@ def _apply_overrides(config: dict[str, Any], overrides: dict[str, Any]):
                 f"Override key {dotted_key!r} must target nested field like model.d_model"
             )
 
-        cursor = config
-
-        for part in parts[:-1]:
-            if part not in cursor or not isinstance(cursor[part], dict):
-                raise ValueError(f"Invalid override path: {dotted_key}")
-            cursor = cursor[part]
-
-        leaf = parts[-1]
         root = parts[0]
 
-        if leaf not in cursor and leaf not in _ALLOWED_OVERRIDE_FIELDS.get(root, set()):
+        if root == "model":
+            if len(parts) < 3:
+                raise ValueError(
+                    f"Override key {dotted_key!r} must target nested field like model.encoder.d_model"
+                )
+
+            model_config = config.get("model")
+            if not isinstance(model_config, dict):
+                raise ValueError("Config section 'model' must be a mapping.")
+
+            subsection = parts[1]
+            allowed_model_fields = _ALLOWED_OVERRIDE_FIELDS["model"]
+            if subsection not in allowed_model_fields:
+                raise ValueError(f"Unknown config field: {dotted_key}")
+
+            section_config = model_config.get(subsection)
+            if not isinstance(section_config, dict):
+                raise ValueError(f"Invalid override path: {dotted_key}")
+
+            cursor = section_config
+            for part in parts[2:-1]:
+                if part not in cursor or not isinstance(cursor[part], dict):
+                    raise ValueError(f"Invalid override path: {dotted_key}")
+                cursor = cursor[part]
+
+            leaf = parts[-1]
+            if leaf not in allowed_model_fields[subsection]:
+                raise ValueError(f"Unknown config field: {dotted_key}")
+
+            cursor[leaf] = value
+            continue
+
+        if root not in {"data", "training"}:
+            raise ValueError(f"Unknown config section: {root}")
+
+        if len(parts) != 2:
+            raise ValueError(
+                f"Override key {dotted_key!r} must target nested field like {root}.learning_rate"
+            )
+
+        section_config = config.get(root)
+        if not isinstance(section_config, dict):
+            raise ValueError(f"Config section {root!r} must be a mapping.")
+
+        leaf = parts[1]
+        if leaf not in _ALLOWED_OVERRIDE_FIELDS[root]:
             raise ValueError(f"Unknown config field: {dotted_key}")
 
-        cursor[leaf] = value
+        section_config[leaf] = value
 
 
 def _inject_standardized_output_paths(
@@ -262,7 +305,7 @@ def _inject_standardized_output_paths(
     training["save_best_checkpoint_path"] = str(paths.best_checkpoint_path.resolve())
 
     # logging
-    training["csv_log_path"] = str(paths.csv_log_path.resolve())
+    training["log_dir"] = str(paths.log_dir.resolve())
     training["tensorboard_log_dir"] = str(paths.tensorboard_log_dir.resolve())
 
     # resume控制（防止污染实验）
