@@ -101,8 +101,10 @@ training:
   resume_checkpoint_path: null
 
   # ===== logs =====
-  csv_log_path: logs/seq2seq.csv
-  tensorboard_log_dir: logs/tensorboard
+  log_dir: logs/
+  use_wandb_logger: false
+  wandb_project: CSCI544-Project-MIDI-to-Score
+  wandb_name: null
 
   # ===== Training strategy =====
   training_mode: lora

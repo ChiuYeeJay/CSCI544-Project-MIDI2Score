@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor, DeviceStatsMonitor
-from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
+from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger, WandbLogger
 from peft import LoraConfig, get_peft_model
 from transformers.optimization import (
     get_constant_schedule_with_warmup,
@@ -63,8 +63,12 @@ class Seq2SeqTrainingConfig:
     save_best_checkpoint_path: str | None = None
     resume_checkpoint_path: str | None = None
 
-    csv_log_path: str | None = None
+    log_dir: str | None = None
     tensorboard_log_dir: str | None = None
+
+    use_wandb_logger: bool = False
+    wandb_project: str | None = None
+    wandb_name: str | None = None
 
     training_mode: TrainingMode = "lora"
     decoder_pretrained_learning_rate: float | None = None
@@ -494,10 +498,20 @@ def run_seq2seq_training_loop(
     
     # 6. 設定 PyTorch Lightning Loggers
     loggers = []
-    if training_config.tensorboard_log_dir:
-        loggers.append(TensorBoardLogger(save_dir=training_config.tensorboard_log_dir, name="seq2seq"))
-    if training_config.csv_log_path:
-        loggers.append(CSVLogger(save_dir=Path(training_config.csv_log_path).parent, name="csv_logs"))
+    if training_config.log_dir:
+        loggers.append(CSVLogger(save_dir=Path(training_config.log_dir), name="csv"))
+        loggers.append(TensorBoardLogger(save_dir=Path(training_config.log_dir), name="tensorboard"))
+
+        if training_config.use_wandb_logger:
+            try:
+                wandb_logger = WandbLogger(
+                    project=training_config.wandb_project,
+                    name=training_config.wandb_name,
+                    save_dir=Path(training_config.log_dir),
+                )
+                loggers.append(wandb_logger)
+            except ImportError:
+                print("WandbLogger is not available. Please install wandb or login to use it.")
 
     # 7. 設定 Callbacks
     callbacks = [LearningRateMonitor(logging_interval='step'), DeviceStatsMonitor()]

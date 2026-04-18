@@ -22,6 +22,7 @@ dependencies = [
     "miditok>=3.0.6.post1",
     "music21>=9.9.1",
     "transformers>=5.5.4",
+    "wandb>=0.26.0",
 ]
 
 [[tool.uv.index]]
