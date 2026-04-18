@@ -19,9 +19,9 @@ model:
     num_layers: 8
     dim_feedforward: 2048
     dropout: 0.05
-    activation: "swiglu"
+    activation: swiglu
     max_length: 1024
-    position_encoding_type: "rope"
+    position_encoding_type: rope
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
     src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
@@ -32,8 +32,7 @@ model:
     eos_token_id: 2
 
 data:
-  dataset_path: DATA/huggingface_seq2seq_rd
-  split: training
+  dataset_path: DATA/huggingface_seq2seq_truncated
 
   max_source_length: 1024
   max_target_length: 1024
@@ -42,6 +41,8 @@ data:
 
   length_bucketing: true
   bucket_size_multiplier: 50
+  bucketing_mode: mixed
+  source_length_weight: 0.2
 
   num_workers: 4
   shuffle_seed: 42
@@ -82,7 +83,7 @@ training:
   # ===== eval =====
   val_check_interval: 0.5
   check_val_every_n_epoch: 1
-  num_eval_batches: 16
+  num_eval_batches: 0.5
 
   early_stopping_patience: null
   early_stopping_min_delta: 0.0

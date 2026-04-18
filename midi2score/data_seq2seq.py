@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict, field
 from functools import partial
-from typing import TypedDict
+from typing import Literal, TypedDict
 import warnings
 
 import torch
@@ -10,9 +10,16 @@ from datasets import Dataset as HFDataset
 from datasets import DatasetDict, load_from_disk
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import BatchSampler, DataLoader, Dataset, get_worker_info
+from torch.utils.data import BatchSampler, DataLoader, Dataset
 from pathlib import Path
 import json
+
+
+NOISE_FIELDS = {
+    "clean": "midi_clean_ids",
+    "light": "midi_light_ids",
+    "heavy": "midi_heavy_ids",
+}
 
 @dataclass(slots=True)
 class Seq2SeqDataConfig:
@@ -20,7 +27,6 @@ class Seq2SeqDataConfig:
     # Dataset
     # =========================
     dataset_path: str
-    split: str = "training"
 
     # =========================
     # Sequence length
@@ -38,6 +44,8 @@ class Seq2SeqDataConfig:
     # =========================
     length_bucketing: bool = False
     bucket_size_multiplier: int = 50
+    bucketing_mode: Literal["target_only", "source_only", "mixed"] = "mixed"
+    source_length_weight: float = 0.2
 
     # =========================
     # Dataloader
@@ -74,16 +82,23 @@ class Seq2SeqDataConfig:
         if self.max_target_length < 2:
             raise ValueError("max_target_length must be >= 2")
 
-        if self.split not in {"training", "validation", "test"}:
-            raise ValueError("split must be one of training/validation/test")
-
         if self.bucket_size_multiplier <= 0:
             raise ValueError("bucket_size_multiplier must be positive")
+        if self.bucketing_mode not in {"target_only", "source_only", "mixed"}:
+            raise ValueError("bucketing_mode must be one of target_only/source_only/mixed")
+        if self.source_length_weight < 0:
+            raise ValueError("source_length_weight must be non-negative")
         
         for i in range(len(self.curriculum_stage_prob)):
-            if sum(self.curriculum_stage_prob[i]) != 1.0:
+            total = sum(self.curriculum_stage_prob[i])
+            if total <= 0.0:
+                warnings.warn(
+                    f"curriculum_stage_prob[{i}] sums to {total}, replacing with uniform distribution"
+                )
+                n = len(self.curriculum_stage_prob[i])
+                self.curriculum_stage_prob[i] = [1.0 / n] * n
+            elif abs(total - 1.0) > 1e-8:
                 warnings.warn(f"curriculum_stage_prob[{i}] do not sum to 1.0, normalizing them to sum to 1.0")
-                total = sum(self.curriculum_stage_prob[i])
                 self.curriculum_stage_prob[i] = [p / total for p in self.curriculum_stage_prob[i]]
 
     # =========================
@@ -129,31 +144,85 @@ class Seq2SeqBatch:
 # Dataset
 # =========================
 class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
-    def __init__(self, config: Seq2SeqDataConfig):
+    def __init__(
+        self,
+        config: Seq2SeqDataConfig,
+        split: Literal["training", "validation", "test"] = "training",
+    ):
         self.config = config
+        self.split = split
 
         self.current_stage = 0
+
+        if self.split not in {"training", "validation", "test"}:
+            raise ValueError("split must be one of training/validation/test")
 
         dataset_dict = load_from_disk(config.dataset_path)
         if not isinstance(dataset_dict, DatasetDict):
             raise ValueError("dataset_path must point to DatasetDict")
 
-        self.dataset: HFDataset = dataset_dict[config.split]
-        self.lengths = list(self.dataset["lmx_length"])
+        if self.split not in dataset_dict:
+            raise ValueError(
+                f"Dataset split {self.split!r} not found. Available splits: {list(dataset_dict.keys())}"
+            )
+
+        self.dataset: HFDataset = dataset_dict[self.split]
+        self.noise_variants = ["clean", "light", "heavy"]
+
+        required_columns = {
+            "lmx_ids",
+            "midi_clean_ids",
+            "midi_light_ids",
+            "midi_heavy_ids",
+            "source_length_clean",
+            "source_length_light",
+            "source_length_heavy",
+            "target_length_clean",
+            "target_length_light",
+            "target_length_heavy",
+            "lmx_cutoff_clean",
+            "lmx_cutoff_light",
+            "lmx_cutoff_heavy",
+        }
+        missing = sorted(required_columns.difference(self.dataset.column_names))
+        if missing:
+            raise ValueError(
+                "Dataset schema mismatch. Expected truncated dataset columns are missing: "
+                f"{missing}"
+            )
+
+        self.source_length_tensors: dict[str, Tensor] = {}
+        self.target_length_tensors: dict[str, Tensor] = {}
+
+        for variant in self.noise_variants:
+            source_length_field = f"source_length_{variant}"
+            target_length_field = f"target_length_{variant}"
+
+            source_lengths = torch.tensor(self.dataset[source_length_field], dtype=torch.float32)
+            target_lengths = torch.tensor(self.dataset[target_length_field], dtype=torch.float32)
+
+            self.source_length_tensors[variant] = source_lengths.clamp(max=float(config.max_source_length))
+            self.target_length_tensors[variant] = target_lengths.clamp(max=float(config.max_target_length))
+
+        self.lengths: list[float] = []
+        self.stage_probs: list[float] = []
+        self.noise_probs = torch.empty(0)
+        self.set_stage(0)
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index: int) -> Seq2SeqExample:
         item = self.dataset[index]
-        
-        noise_keys = ["midi_clean_ids", "midi_light_ids", "midi_heavy_ids"]
-        probs = torch.tensor(self.config.curriculum_stage_prob[self.current_stage])
-        idx = torch.multinomial(probs, num_samples=1).item()
-        selected_key = noise_keys[idx]
 
-        lmx = item["lmx_ids"]
+        idx = torch.multinomial(self.noise_probs, num_samples=1).item()
+        variant = self.noise_variants[idx]
+        selected_key = NOISE_FIELDS[variant]
+
         midi = item[selected_key]
+        lmx = item["lmx_ids"]
+        lmx_cutoff = int(item[f"lmx_cutoff_{variant}"])
+        lmx = lmx[:lmx_cutoff]
 
         midi_trimmed = midi[:self.config.max_source_length]
         lmx_trimmed = lmx[:self.config.max_target_length]
@@ -166,10 +235,43 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
     def set_stage(self, stage: int):
         if 0 <= stage and stage < len(self.config.curriculum_stage_prob):
             self.current_stage = stage
-            self.noise_probs = self.config.curriculum_stage_prob[stage]
-            # print(f"Dataset switched to stage: {stage} (Probs: {self.noise_probs})")
+            probs = list(self.config.curriculum_stage_prob[stage])
+
+            if len(probs) != len(self.noise_variants):
+                raise ValueError(
+                    "curriculum_stage_prob must match 3 noise variants (clean/light/heavy)."
+                )
+
+            probs_tensor = torch.tensor(probs, dtype=torch.float32)
+            prob_sum = float(probs_tensor.sum().item())
+            if prob_sum <= 0.0:
+                probs_tensor = torch.full((len(self.noise_variants),), 1.0 / len(self.noise_variants))
+            else:
+                probs_tensor = probs_tensor / prob_sum
+
+            self.stage_probs = probs_tensor.tolist()
+            self.noise_probs = probs_tensor
+            self._refresh_bucket_lengths()
         else:
             raise ValueError(f"Stage {stage} is out of bounds for curriculum_stage_prob")
+
+    def _refresh_bucket_lengths(self) -> None:
+        n_items = len(self.dataset)
+        expected_source = torch.zeros(n_items, dtype=torch.float32)
+        expected_target = torch.zeros(n_items, dtype=torch.float32)
+
+        for prob, variant in zip(self.stage_probs, self.noise_variants):
+            expected_source += float(prob) * self.source_length_tensors[variant]
+            expected_target += float(prob) * self.target_length_tensors[variant]
+
+        if self.config.bucketing_mode == "target_only":
+            bucket_lengths = expected_target
+        elif self.config.bucketing_mode == "source_only":
+            bucket_lengths = expected_source
+        else:
+            bucket_lengths = expected_target + (self.config.source_length_weight * expected_source)
+
+        self.lengths = bucket_lengths.tolist()
 
 # =========================
 # Length Bucketing
@@ -259,8 +361,10 @@ def collate_seq2seq_batch(
     labels = decoder_tokens[:, 1:].clone()
     labels[labels == pad_token_id] = -100
 
-    # ✅ 更安全 mask（针对 [T,7]）
-    encoder_mask = encoder_tokens[..., 0].eq(pad_token_id)
+    if encoder_tokens.dim() == 3:
+        encoder_mask = encoder_tokens[..., 0].eq(pad_token_id)
+    else:
+        raise ValueError(f"Unexpected encoder token shape: {tuple(encoder_tokens.shape)}")
 
     return Seq2SeqBatch(
         encoder_input_tokens=encoder_tokens,
@@ -277,12 +381,13 @@ def build_seq2seq_dataloader(
     config: Seq2SeqDataConfig,
     *,
     batch_size: int,
+    split: Literal["training", "validation", "test"] = "training",
     shuffle: bool | None = None,
 ):
-    dataset = HuggingFaceSeq2SeqDataset(config)
+    dataset = HuggingFaceSeq2SeqDataset(config, split=split)
 
     if shuffle is None:
-        shuffle = config.split == "training"
+        shuffle = split == "training"
 
     dataloader_kwargs = {
         "dataset": dataset,
@@ -293,7 +398,7 @@ def build_seq2seq_dataloader(
         ),
     }
 
-    if config.split == "training" and config.length_bucketing:
+    if split == "training" and config.length_bucketing:
         print("Using LengthBucketBatchSampler for training dataloader.")
         dataloader_kwargs["batch_sampler"] = LengthBucketBatchSampler(
             dataset=dataset,
@@ -305,7 +410,7 @@ def build_seq2seq_dataloader(
         )
     else:
         generator = None
-        if config.split == "training":
+        if split == "training":
             generator = torch.Generator().manual_seed(config.shuffle_seed)
 
         dataloader_kwargs["batch_size"] = batch_size

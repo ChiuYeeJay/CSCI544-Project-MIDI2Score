@@ -41,8 +41,38 @@ Each sample must contain:
 
 ```python
 {
-  "midi_clean_ids": List[List[int]]   # encoder input (CPWord tokens)
-  "lmx_ids": List[int]                # decoder target tokens
+  "midi_clean_ids": List[List[int]]
+  "midi_light_ids": List[List[int]]
+  "midi_heavy_ids": List[List[int]]
+  "lmx_ids": List[int]
+}
+```
+
+For structure-aware truncation, generate a second dataset from the tokenized one:
+
+```bash
+python hf_dataset/hf_dataset_seq2seq_truncate.py \
+  --input-path DATA/huggingface_seq2seq_rd \
+  --output-path DATA/huggingface_seq2seq_truncated \
+  --tokenizer-path DATA/tokenizer_rd.json \
+  --max-source-length 1024 \
+  --max-target-length 1024 \
+  --lookahead-tokens 0
+```
+
+The truncated dataset keeps `lmx_ids` and `midi_*_ids`, and adds per-noise metadata fields such as:
+
+```python
+{
+  "source_length_clean": int,
+  "source_length_light": int,
+  "source_length_heavy": int,
+  "target_length_clean": int,
+  "target_length_light": int,
+  "target_length_heavy": int,
+  "lmx_cutoff_clean": int,
+  "lmx_cutoff_light": int,
+  "lmx_cutoff_heavy": int,
 }
 ```
 

@@ -32,8 +32,7 @@ model:
     eos_token_id: 2
 
 data:
-  pretrained_decoder_path: DATA/pretrained_decoder/decoder_qkv_rope_best.pt
-  split: training
+  dataset_path: DATA/huggingface_seq2seq_truncated
 
   max_source_length: 1024
   max_target_length: 1024
@@ -42,6 +41,8 @@ data:
 
   length_bucketing: true
   bucket_size_multiplier: 50
+  bucketing_mode: mixed
+  source_length_weight: 0.2
 
   num_workers: 4
   shuffle_seed: 42

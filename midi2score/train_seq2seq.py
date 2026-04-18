@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import os
 import time
-import copy
 import shutil
 from dataclasses import asdict, dataclass, field
 from lightning.pytorch.callbacks import Callback
@@ -405,15 +404,22 @@ def run_seq2seq_training_loop(
     _validate_setup(model_config, data_config)
 
     # 1. 建立 DataLoader
-    train_loader = build_seq2seq_dataloader(data_config, batch_size=training_config.batch_size)
+    train_loader = build_seq2seq_dataloader(
+        data_config,
+        batch_size=training_config.batch_size,
+        split="training",
+    )
     
     val_loader = None
     has_validation = training_config.val_check_interval > 0
 
     if has_validation:
-        val_data_config = copy.deepcopy(data_config)
-        val_data_config.split = "validation"
-        val_loader = build_seq2seq_dataloader(val_data_config, batch_size=training_config.batch_size, shuffle=False)
+        val_loader = build_seq2seq_dataloader(
+            data_config,
+            batch_size=training_config.batch_size,
+            split="validation",
+            shuffle=False,
+        )
 
     # 2. 初始化模型
     model = LitSeq2Seq(model_config, training_config)
