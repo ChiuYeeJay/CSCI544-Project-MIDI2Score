@@ -51,7 +51,6 @@ class Seq2SeqDataConfig:
     # Dataloader
     # =========================
     num_workers: int = 0
-    shuffle_seed: int = 0
 
     # =========================
     # Tokens
@@ -383,6 +382,7 @@ def build_seq2seq_dataloader(
     batch_size: int,
     split: Literal["training", "validation", "test"] = "training",
     shuffle: bool | None = None,
+    random_seed: int = 42,
 ):
     dataset = HuggingFaceSeq2SeqDataset(config, split=split)
 
@@ -404,14 +404,14 @@ def build_seq2seq_dataloader(
             dataset=dataset,
             batch_size=batch_size,
             bucket_size_multiplier=config.bucket_size_multiplier,
-            seed=config.shuffle_seed,
+            seed=random_seed,
             shuffle=shuffle,
             drop_last=False,
         )
     else:
         generator = None
         if split == "training":
-            generator = torch.Generator().manual_seed(config.shuffle_seed)
+            generator = torch.Generator().manual_seed(random_seed)
 
         dataloader_kwargs["batch_size"] = batch_size
         dataloader_kwargs["shuffle"] = shuffle

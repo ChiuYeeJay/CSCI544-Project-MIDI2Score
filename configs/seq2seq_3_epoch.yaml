@@ -45,7 +45,6 @@ data:
   source_length_weight: 0.2
 
   num_workers: 4
-  shuffle_seed: 42
 
   pad_token_id: 0
   bos_token_id: 1
@@ -61,8 +60,8 @@ training:
   pretrained_decoder_path: DATA/qkv_rope_normfix.pt
 
   # ===== batch & optimizer =====
-  batch_size: 32
-  accumulate_grad_batches: 4
+  batch_size: 48
+  accumulate_grad_batches: 3
   precision: bf16-mixed
   learning_rate: 0.0003
   weight_decay: 0.1
@@ -90,6 +89,7 @@ training:
 
   # ===== logging =====
   log_every: 100
+  random_seed: 42
 
   device: auto
 

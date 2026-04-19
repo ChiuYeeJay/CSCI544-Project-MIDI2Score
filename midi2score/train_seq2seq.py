@@ -56,6 +56,7 @@ class Seq2SeqTrainingConfig:
     val_check_interval: int | float = 50
     check_val_every_n_epoch: int | None = None
     num_eval_batches: int | None = None
+    random_seed: int = 42
 
     device: str = "auto"
 
@@ -120,6 +121,8 @@ class Seq2SeqTrainingConfig:
             raise ValueError("If val_check_interval is a fraction, check_val_every_n_epoch must be set.")
         if self.num_eval_batches is not None and self.num_eval_batches <= 0:
             raise ValueError("num_eval_batches must be positive.")
+        if self.random_seed < 0:
+            raise ValueError("random_seed must be non-negative.")
         if self.resume_checkpoint_path is not None and not Path(self.resume_checkpoint_path).exists():
             raise ValueError(f"resume_checkpoint_path does not exist: {self.resume_checkpoint_path}")
         if self.training_mode not in {"full_ft", "lora", "end_to_end"}:
@@ -407,11 +410,14 @@ def run_seq2seq_training_loop(
     
     _validate_setup(model_config, data_config)
 
+    L.seed_everything(training_config.random_seed, workers=True)
+
     # 1. 建立 DataLoader
     train_loader = build_seq2seq_dataloader(
         data_config,
         batch_size=training_config.batch_size,
         split="training",
+        random_seed=training_config.random_seed,
     )
     
     val_loader = None
@@ -423,6 +429,7 @@ def run_seq2seq_training_loop(
             batch_size=training_config.batch_size,
             split="validation",
             shuffle=False,
+            random_seed=training_config.random_seed,
         )
 
     # 2. 初始化模型
