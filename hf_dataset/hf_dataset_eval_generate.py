@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Generate a test-only evaluation dataset from structure-aware truncated seq2seq data. "
-            "Outputs a HuggingFace dataset plus truncated .musicxml/.mid artifacts."
+            "Outputs a HuggingFace dataset plus truncated .xml/.mid artifacts."
         )
     )
     parser.add_argument("--input-path", type=Path, required=True, help="Path to truncated DatasetDict")
@@ -228,7 +228,7 @@ def main() -> None:
         cutoff = clamp_cutoff(int(row[f"lmx_cutoff_{selected_variant}"]), len(lmx_ids))
         selected_lmx_ids = lmx_ids[:cutoff]
 
-        xml_rel = Path("musicxml") / f"{sample_id}.musicxml"
+        xml_rel = Path("musicxml") / f"{sample_id}.xml"
         midi_rel = Path("midi") / f"{sample_id}.mid"
 
         xml_ok = False
