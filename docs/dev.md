@@ -623,5 +623,114 @@ logs/research/<experiment_id>.csv
 
 ---
 
+# 7. Evaluation Dataset Workflow
+
+This section describes how to build a teammate-friendly evaluation dataset from the truncated HuggingFace dataset, then run two evaluation pipelines.
+
+## 7.1 Generate Evaluation Dataset (test split)
+
+Use this script to generate:
+
+* a new test-only HuggingFace dataset with `id`, `selected_variant`, and `selected_*` fields
+* truncated MusicXML files (`.xml`)
+* truncated MIDI files (`.mid`)
+* a JSONL manifest (`manifests/test.jsonl`)
+
+```bash
+python hf_dataset/hf_dataset_eval_generate.py \
+  --input-path DATA/huggingface_seq2seq_truncated \
+  --output-root DATA/eval_dataset_v1 \
+  --tokenizer-path DATA/tokenizer_rd.json \
+  --ratio-clean 1.0 \
+  --ratio-light 1.0 \
+  --ratio-heavy 1.0 \
+  --seed 42 \
+  --id-style pred_seq2seq
+```
+
+Notes:
+
+* `--id-style pred_seq2seq` uses IDs like `sample_123_0`, compatible with current fallback naming in `midi2score/pred_seq2seq.py`.
+* Variant assignment is deterministic and reproducible with `--seed`.
+* If you need a quick smoke test, add `--max-samples 30`.
+
+Output layout:
+
+```text
+DATA/eval_dataset_v1/
+  hf_dataset/
+  musicxml/
+  midi/
+  manifests/test.jsonl
+  summary.json
+  logs/
+```
+
+---
+
+## 7.2 Pipeline A: Our Model -> XML Evaluation
+
+This example script runs:
+
+1. `pred_seq2seq.py` on generated eval HF dataset
+2. converts predicted `.lmx` to `.xml`
+3. calls `evaluation.py` in XML mode
+
+```bash
+python scripts/eval_examples/run_our_model_eval_example.py \
+  --base-config configs/seq2seq_baseline.yaml \
+  --ckpt best_models/full/best.pt \
+  --eval-root DATA/eval_dataset_v1 \
+  --work-dir artifacts/eval_examples/our_model \
+  --python-bin python
+```
+
+Main outputs:
+
+* `artifacts/eval_examples/our_model/pred_lmx/`
+* `artifacts/eval_examples/our_model/pred_xml/`
+* `artifacts/eval_examples/our_model/our_model_eval_report.json`
+
+---
+
+## 7.3 Pipeline B: External Model Template -> XML Evaluation
+
+Use this template to evaluate external models that consume truncated MIDI and output MusicXML.
+
+```bash
+python scripts/eval_examples/run_external_model_eval_template.py \
+  --eval-root DATA/eval_dataset_v1 \
+  --pred-xml-dir artifacts/eval_examples/external_model/pred_xml \
+  --python-bin python
+```
+
+If you want the template to attempt auto-generation for missing predictions, implement `generate_prediction_xml_from_midi(...)` in that script and run with:
+
+```bash
+python scripts/eval_examples/run_external_model_eval_template.py \
+  --eval-root DATA/eval_dataset_v1 \
+  --pred-xml-dir artifacts/eval_examples/external_model/pred_xml \
+  --generate-missing \
+  --python-bin python
+```
+
+The template writes:
+
+* alignment precheck log (missing/extra filenames)
+* final evaluation report JSON
+
+---
+
+## 7.4 Filename Alignment Rule
+
+`evaluation.py` pairs files by exact filename. For XML evaluation:
+
+* GT: `DATA/eval_dataset_v1/musicxml/<id>.xml`
+* Pred: `<pred_xml_dir>/<id>.xml`
+
+Any missing prediction files are counted in `validity.missing_prediction_files`.
+
+---
+
 
 
