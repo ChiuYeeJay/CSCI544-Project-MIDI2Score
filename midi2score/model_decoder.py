@@ -1,4 +1,4 @@
-# copy from https://github.com/daniellaah/MIDI2Score/blob/main/midi2score/model.py
+# modify from https://github.com/daniellaah/MIDI2Score/blob/main/midi2score/model.py
 from __future__ import annotations
 
 import copy
@@ -51,8 +51,9 @@ class SinusoidalPositionalEncoding(nn.Module):
         encoding[:, 1::2] = torch.cos(positions * div_term)
         self.register_buffer("encoding", encoding.unsqueeze(0), persistent=False)
 
-    def forward(self, tokens: Tensor) -> Tensor:
-        return self.encoding[:, : tokens.size(1)]
+    def forward(self, tokens: Tensor, *, position_offset: int = 0) -> Tensor:
+        end = position_offset + tokens.size(1)
+        return self.encoding[:, position_offset:end]
 
 
 class ZeroPositionalEncoding(nn.Module):
@@ -60,7 +61,7 @@ class ZeroPositionalEncoding(nn.Module):
         super().__init__()
         self.d_model = d_model
 
-    def forward(self, tokens: Tensor) -> Tensor:
+    def forward(self, tokens: Tensor, *, position_offset: int = 0) -> Tensor:
         return torch.zeros(
             (1, tokens.size(1), self.d_model),
             dtype=torch.float32,
@@ -111,9 +112,19 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("cos", angles.cos().unsqueeze(0).unsqueeze(0), persistent=False)
         self.register_buffer("sin", angles.sin().unsqueeze(0).unsqueeze(0), persistent=False)
 
-    def forward(self, sequence_length: int, *, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, Tensor]:
-        cos = self.cos[:, :, :sequence_length].to(device=device, dtype=dtype)
-        sin = self.sin[:, :, :sequence_length].to(device=device, dtype=dtype)
+    def forward(
+        self,
+        sequence_length: int,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+        position_offset: int = 0,
+    ) -> tuple[Tensor, Tensor]:
+        end = position_offset + sequence_length
+        if end > self.cos.size(2):
+            raise ValueError("Requested RoPE positions exceed configured max_length.")
+        cos = self.cos[:, :, position_offset:end].to(device=device, dtype=dtype)
+        sin = self.sin[:, :, position_offset:end].to(device=device, dtype=dtype)
         return cos, sin
 
 
@@ -168,36 +179,68 @@ class CausalSelfAttention(nn.Module):
         self.attention_dropout = dropout
         self.rotary = RotaryEmbedding(self.head_dim, max_length=max_length) if self.use_rope else None
 
-    def forward(self, x: Tensor, *, tgt_padding_mask: Tensor | None = None) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        *,
+        tgt_padding_mask: Tensor | None = None,
+        past_key_value: tuple[Tensor, Tensor] | None = None,
+        use_cache: bool = False,
+    ) -> Tensor | tuple[Tensor, tuple[Tensor, Tensor]]:
         batch_size, sequence_length, d_model = x.shape
         query = self.q_proj(x).view(batch_size, sequence_length, self.nhead, self.head_dim).transpose(1, 2)
         key = self.k_proj(x).view(batch_size, sequence_length, self.nhead, self.head_dim).transpose(1, 2)
         value = self.v_proj(x).view(batch_size, sequence_length, self.nhead, self.head_dim).transpose(1, 2)
+
+        past_length = 0
+        past_key = None
+        past_value = None
+        if past_key_value is not None:
+            past_key, past_value = past_key_value
+            past_length = past_key.size(2)
 
         if self.rotary is not None:
             cos, sin = self.rotary(
                 sequence_length,
                 device=x.device,
                 dtype=query.dtype,
+                position_offset=past_length,
             )
             query = apply_rotary_embedding(query, cos, sin)
             key = apply_rotary_embedding(key, cos, sin)
+
+        if past_key is not None and past_value is not None:
+            key = torch.cat((past_key, key), dim=2)
+            value = torch.cat((past_value, value), dim=2)
+
+        total_key_length = key.size(2)
         attention_mask = None
-        use_causal_flag = tgt_padding_mask is None
-        if tgt_padding_mask is not None:
+        use_causal_flag = tgt_padding_mask is None and past_length == 0
+        if not use_causal_flag:
             attention_mask = torch.zeros(
-                (batch_size, 1, sequence_length, sequence_length),
+                (batch_size, 1, sequence_length, total_key_length),
                 dtype=query.dtype,
                 device=x.device,
             )
+
+            query_positions = torch.arange(sequence_length, device=x.device) + past_length
+            key_positions = torch.arange(total_key_length, device=x.device)
+            causal_mask = key_positions.unsqueeze(0) > query_positions.unsqueeze(1)
             attention_mask = attention_mask.masked_fill(
-                build_causal_mask(sequence_length, device=x.device).unsqueeze(0).unsqueeze(0),
+                causal_mask.unsqueeze(0).unsqueeze(0),
                 float("-inf"),
             )
-            attention_mask = attention_mask.masked_fill(
-                tgt_padding_mask[:, None, None, :],
-                float("-inf"),
-            )
+
+            if tgt_padding_mask is not None:
+                if tgt_padding_mask.size(1) != total_key_length:
+                    raise ValueError(
+                        "tgt_padding_mask length must match total key length when using cached decoding."
+                    )
+                attention_mask = attention_mask.masked_fill(
+                    tgt_padding_mask[:, None, None, :],
+                    float("-inf"),
+                )
+
         output = F.scaled_dot_product_attention(
             query,
             key,
@@ -207,7 +250,11 @@ class CausalSelfAttention(nn.Module):
             is_causal=use_causal_flag,
         )
         output = output.transpose(1, 2).contiguous().view(batch_size, sequence_length, d_model)
-        return self.out_proj(output)
+        output = self.out_proj(output)
+
+        if use_cache:
+            return output, (key, value)
+        return output
 
 
 class CrossAttention(nn.Module):
@@ -227,12 +274,19 @@ class CrossAttention(nn.Module):
         *,
         memory: Tensor,
         memory_padding_mask: Tensor | None = None,
-    ) -> Tensor:
+        cross_key_value: tuple[Tensor, Tensor] | None = None,
+        use_cache: bool = False,
+    ) -> Tensor | tuple[Tensor, tuple[Tensor, Tensor]]:
         batch_size, target_length, d_model = x.shape
-        source_length = memory.size(1)
         query = self.q_proj(x).view(batch_size, target_length, self.nhead, self.head_dim).transpose(1, 2)
-        key = self.k_proj(memory).view(batch_size, source_length, self.nhead, self.head_dim).transpose(1, 2)
-        value = self.v_proj(memory).view(batch_size, source_length, self.nhead, self.head_dim).transpose(1, 2)
+
+        if cross_key_value is None:
+            source_length = memory.size(1)
+            key = self.k_proj(memory).view(batch_size, source_length, self.nhead, self.head_dim).transpose(1, 2)
+            value = self.v_proj(memory).view(batch_size, source_length, self.nhead, self.head_dim).transpose(1, 2)
+        else:
+            key, value = cross_key_value
+            source_length = key.size(2)
 
         attention_mask = None
         if memory_padding_mask is not None:
@@ -255,7 +309,10 @@ class CrossAttention(nn.Module):
             is_causal=False,
         )
         output = output.transpose(1, 2).contiguous().view(batch_size, target_length, d_model)
-        return self.out_proj(output)
+        output = self.out_proj(output)
+        if use_cache:
+            return output, (key, value)
+        return output
 
 
 class TransformerDecoderLayer(nn.Module):
@@ -303,25 +360,42 @@ class TransformerDecoderLayer(nn.Module):
         memory: Tensor | None = None,
         tgt_padding_mask: Tensor | None = None,
         memory_padding_mask: Tensor | None = None,
-    ) -> Tensor:
+        past_self_key_value: tuple[Tensor, Tensor] | None = None,
+        past_cross_key_value: tuple[Tensor, Tensor] | None = None,
+        use_cache: bool = False,
+    ) -> Tensor | tuple[Tensor, dict[str, tuple[Tensor, Tensor] | None]]:
         x = tgt
         self_attn_input = self.self_attn_norm(x)
         self_attn_output = self.self_attn(
             self_attn_input,
             tgt_padding_mask=tgt_padding_mask,
+            past_key_value=past_self_key_value,
+            use_cache=use_cache,
         )
+        present_self_key_value = None
+        if use_cache:
+            self_attn_output, present_self_key_value = self_attn_output
         x = x + self.self_attn_dropout(self_attn_output)
+
+        present_cross_key_value = None
         if memory is not None:
             cross_attn_input = self.cross_attn_norm(x)
             cross_attn_output = self.cross_attn(
                 cross_attn_input,
                 memory=memory,
                 memory_padding_mask=memory_padding_mask,
+                cross_key_value=past_cross_key_value,
+                use_cache=use_cache,
             )
+            if use_cache:
+                cross_attn_output, present_cross_key_value = cross_attn_output
             x = x + self.cross_attn_dropout(cross_attn_output)
         ff_input = self.ffn_norm(x)
         ff_output = self.feedforward(ff_input)
         x = x + self.ffn_dropout(ff_output)
+
+        if use_cache:
+            return x, {"self": present_self_key_value, "cross": present_cross_key_value}
         return x
 
 
@@ -358,16 +432,39 @@ class TransformerDecoderStack(nn.Module):
         memory: Tensor | None = None,
         tgt_padding_mask: Tensor | None = None,
         memory_padding_mask: Tensor | None = None,
-    ) -> Tensor:
+        past_key_values: list[dict[str, tuple[Tensor, Tensor] | None]] | None = None,
+        use_cache: bool = False,
+    ) -> Tensor | tuple[Tensor, list[dict[str, tuple[Tensor, Tensor] | None]]]:
         x = tgt
-        for layer in self.layers:
-            x = layer(
+        if past_key_values is not None and len(past_key_values) != len(self.layers):
+            raise ValueError("past_key_values must have one entry per decoder layer.")
+
+        next_key_values: list[dict[str, tuple[Tensor, Tensor] | None]] = []
+        for idx, layer in enumerate(self.layers):
+            layer_past = past_key_values[idx] if past_key_values is not None else None
+            past_self_key_value = layer_past.get("self") if layer_past is not None else None
+            past_cross_key_value = layer_past.get("cross") if layer_past is not None else None
+
+            layer_output = layer(
                 x,
                 memory=memory,
                 tgt_padding_mask=tgt_padding_mask,
                 memory_padding_mask=memory_padding_mask,
+                past_self_key_value=past_self_key_value,
+                past_cross_key_value=past_cross_key_value,
+                use_cache=use_cache,
             )
-        return self.norm(x)
+
+            if use_cache:
+                x, layer_cache = layer_output
+                next_key_values.append(layer_cache)
+            else:
+                x = layer_output
+
+        x = self.norm(x)
+        if use_cache:
+            return x, next_key_values
+        return x
 
 
 class TransformerDecoderLM(nn.Module):
@@ -404,9 +501,9 @@ class TransformerDecoderLM(nn.Module):
             if parameter.dim() > 1:
                 nn.init.xavier_uniform_(parameter)
 
-    def decode(self, input_tokens: Tensor) -> Tensor:
+    def decode(self, input_tokens: Tensor, *, position_offset: int = 0) -> Tensor:
         embeddings = self.tgt_embedding(input_tokens) * math.sqrt(self.config.d_model)
-        return self.dropout(embeddings + self.position_encoding(input_tokens))
+        return self.dropout(embeddings + self.position_encoding(input_tokens, position_offset=position_offset))
 
     def forward(
         self,
@@ -415,12 +512,26 @@ class TransformerDecoderLM(nn.Module):
         padding_mask: Tensor | None = None,
         memory: Tensor | None = None,
         memory_padding_mask: Tensor | None = None,
-    ) -> Tensor:
-        decoded_inputs = self.decode(input_tokens)
+        past_key_values: list[dict[str, tuple[Tensor, Tensor] | None]] | None = None,
+        use_cache: bool = False,
+    ) -> Tensor | tuple[Tensor, list[dict[str, tuple[Tensor, Tensor] | None]]]:
+        position_offset = 0
+        if past_key_values is not None and len(past_key_values) > 0:
+            first_layer_self_cache = past_key_values[0].get("self")
+            if first_layer_self_cache is not None:
+                position_offset = first_layer_self_cache[0].size(2)
+
+        decoded_inputs = self.decode(input_tokens, position_offset=position_offset)
         hidden_states = self.decoder(
             decoded_inputs,
             memory=memory,
             tgt_padding_mask=padding_mask,
             memory_padding_mask=memory_padding_mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
         )
+
+        if use_cache:
+            hidden_states, present_key_values = hidden_states
+            return self.output_projection(hidden_states), present_key_values
         return self.output_projection(hidden_states)
