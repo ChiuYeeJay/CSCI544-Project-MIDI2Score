@@ -129,6 +129,15 @@ def decode_cpword_to_midi(cpword_ids: list[list[int]]) -> Any:
     return cpword_tokenizer.decode(cpword_ids)
 
 
+def decode_bpe_to_lmx_text(token_ids: list[int], tokenizer: MusicXMLTokenizer) -> str:
+    if not token_ids:
+        return ""
+
+    byte_str = tokenizer.bpe.decode(token_ids)
+    lmx_text = tokenizer.mapper.decode_to_lmx(byte_str)
+    return lmx_text.strip()
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
@@ -192,11 +201,13 @@ def main() -> None:
 
     out_hf_path = output_root / "hf_dataset"
     out_xml_dir = output_root / "musicxml"
+    out_lmx_dir = output_root / "lmx"
     out_midi_dir = output_root / "midi"
     out_manifest_dir = output_root / "manifests"
     out_logs_dir = output_root / "logs"
 
     out_xml_dir.mkdir(parents=True, exist_ok=True)
+    out_lmx_dir.mkdir(parents=True, exist_ok=True)
     out_midi_dir.mkdir(parents=True, exist_ok=True)
     out_manifest_dir.mkdir(parents=True, exist_ok=True)
     out_logs_dir.mkdir(parents=True, exist_ok=True)
@@ -209,8 +220,10 @@ def main() -> None:
     rows: list[dict[str, Any]] = []
     variant_counter: Counter[str] = Counter()
     xml_success = 0
+    lmx_success = 0
     midi_success = 0
     xml_failures: list[dict[str, str]] = []
+    lmx_failures: list[dict[str, str]] = []
     midi_failures: list[dict[str, str]] = []
 
     print(f"=== Generating evaluation assets for split '{args.split}' ({len(split_dataset)} samples) ===")
@@ -229,12 +242,24 @@ def main() -> None:
         selected_lmx_ids = lmx_ids[:cutoff]
 
         xml_rel = Path("musicxml") / f"{sample_id}.xml"
+        lmx_rel = Path("lmx") / f"{sample_id}.lmx"
         midi_rel = Path("midi") / f"{sample_id}.mid"
 
         xml_ok = False
+        lmx_ok = False
         midi_ok = False
         xml_error = ""
+        lmx_error = ""
         midi_error = ""
+
+        try:
+            lmx_text = decode_bpe_to_lmx_text(selected_lmx_ids, tokenizer)
+            save_text(output_root / lmx_rel, lmx_text)
+            lmx_ok = True
+            lmx_success += 1
+        except Exception as exc:  # noqa: BLE001
+            lmx_error = str(exc)
+            lmx_failures.append({"id": sample_id, "error": lmx_error})
 
         try:
             xml_text = tokenizer.decode_bpe_to_musicxml(selected_lmx_ids)
@@ -266,10 +291,13 @@ def main() -> None:
                 "selected_source_length": len(selected_cpword_ids),
                 "selected_target_length": len(selected_lmx_ids),
                 "truncated_musicxml_path": str(xml_rel),
+                "truncated_lmx_path": str(lmx_rel),
                 "truncated_midi_path": str(midi_rel),
                 "xml_conversion_ok": xml_ok,
+                "lmx_conversion_ok": lmx_ok,
                 "midi_conversion_ok": midi_ok,
                 "xml_conversion_error": xml_error,
+                "lmx_conversion_error": lmx_error,
                 "midi_conversion_error": midi_error,
             }
         )
@@ -291,17 +319,22 @@ def main() -> None:
                 "selected_source_length": row["selected_source_length"],
                 "selected_target_length": row["selected_target_length"],
                 "truncated_musicxml_path": row["truncated_musicxml_path"],
+                "truncated_lmx_path": row["truncated_lmx_path"],
                 "truncated_midi_path": row["truncated_midi_path"],
                 "xml_conversion_ok": row["xml_conversion_ok"],
+                "lmx_conversion_ok": row["lmx_conversion_ok"],
                 "midi_conversion_ok": row["midi_conversion_ok"],
                 "xml_conversion_error": row["xml_conversion_error"],
+                "lmx_conversion_error": row["lmx_conversion_error"],
                 "midi_conversion_error": row["midi_conversion_error"],
             }
             f.write(json.dumps(manifest_row, ensure_ascii=False) + "\n")
 
     xml_failure_path = out_logs_dir / "xml_failures.json"
+    lmx_failure_path = out_logs_dir / "lmx_failures.json"
     midi_failure_path = out_logs_dir / "midi_failures.json"
     xml_failure_path.write_text(json.dumps(xml_failures, ensure_ascii=False, indent=2), encoding="utf-8")
+    lmx_failure_path.write_text(json.dumps(lmx_failures, ensure_ascii=False, indent=2), encoding="utf-8")
     midi_failure_path.write_text(json.dumps(midi_failures, ensure_ascii=False, indent=2), encoding="utf-8")
 
     n_samples = len(rows)
@@ -324,8 +357,10 @@ def main() -> None:
             for key, value in variant_counter.items()
         },
         "xml_conversion_success": xml_success,
+        "lmx_conversion_success": lmx_success,
         "midi_conversion_success": midi_success,
         "xml_conversion_success_rate": (xml_success / n_samples if n_samples > 0 else 0.0),
+        "lmx_conversion_success_rate": (lmx_success / n_samples if n_samples > 0 else 0.0),
         "midi_conversion_success_rate": (midi_success / n_samples if n_samples > 0 else 0.0),
         "manifest_path": str(manifest_path),
         "hf_dataset_path": str(out_hf_path),
@@ -337,6 +372,7 @@ def main() -> None:
     print("=== Done ===")
     print(f"Saved HF dataset : {out_hf_path}")
     print(f"Saved MusicXML   : {out_xml_dir}")
+    print(f"Saved LMX        : {out_lmx_dir}")
     print(f"Saved MIDI       : {out_midi_dir}")
     print(f"Saved manifest   : {manifest_path}")
     print(f"Saved summary    : {summary_path}")

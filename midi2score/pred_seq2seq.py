@@ -24,9 +24,8 @@ from midi2score.config import load_seq2seq_config
 from evaluation import (
     aggregate_lmx_results,
     aggregate_xml_results,
+    evaluate_lmx_pair,
     evaluate_xml_pair,
-    normalized_edit_distance,
-    split_lmx_by_measure,
 )
 
 from tokenizer.musicxml_tokenizer import MusicXMLTokenizer
@@ -38,7 +37,7 @@ REQUIRED_EVAL_COLUMNS = {
     "selected_variant",
     "selected_cpword_ids",
     "selected_source_length",
-    "selected_lmx_ids",
+    "truncated_lmx_path",
     "truncated_musicxml_path",
 }
 
@@ -49,8 +48,8 @@ class EvalSample:
     variant: str
     cpword_ids: list[list[int]]
     source_length: int
+    gt_lmx_path: Path
     gt_xml_path: Path
-    gt_lmx_ids: list[int] | None
 
 
 @dataclass(slots=True)
@@ -59,8 +58,7 @@ class PredictionRecord:
     variant: str
     pred_lmx_path: Path | None
     pred_xml_path: Path | None
-    pred_lmx_text: str | None
-    gt_lmx_text: str | None
+    gt_lmx_path: Path | None
     gt_xml_path: Path
     lmx_error: str | None
     xml_error: str | None
@@ -199,9 +197,14 @@ def build_eval_samples(
                 f"Row {idx} (id={sample_id}) references missing GT xml path: {gt_xml_path}"
             )
 
-        gt_lmx_ids = row["selected_lmx_ids"]
-        if not gt_lmx_ids:
-            raise ValueError(f"Row {idx} (id={sample_id}) has empty selected_lmx_ids")
+        lmx_rel = str(row["truncated_lmx_path"])
+        if not lmx_rel:
+            raise ValueError(f"Row {idx} (id={sample_id}) has empty truncated_lmx_path")
+        gt_lmx_path = eval_root / lmx_rel
+        if not gt_lmx_path.exists():
+            raise FileNotFoundError(
+                f"Row {idx} (id={sample_id}) references missing GT lmx path: {gt_lmx_path}"
+            )
 
         samples.append(
             EvalSample(
@@ -209,8 +212,8 @@ def build_eval_samples(
                 variant=variant,
                 cpword_ids=cpword_ids,
                 source_length=source_length,
+                gt_lmx_path=gt_lmx_path,
                 gt_xml_path=gt_xml_path,
-                gt_lmx_ids=gt_lmx_ids,
             )
         )
 
@@ -413,7 +416,7 @@ def convert_pred_to_lmx_and_xml(
     sample_id: str,
     lmx_dir: Path,
     xml_dir: Path,
-) -> tuple[Path | None, Path | None, str | None, str | None, str | None]:
+) -> tuple[Path | None, Path | None, str | None, str | None]:
     safe_id = sanitize_sample_id(sample_id)
 
     pred_lmx_path = lmx_dir / f"{safe_id}.lmx"
@@ -422,16 +425,15 @@ def convert_pred_to_lmx_and_xml(
     lmx_error: str | None = None
     xml_error: str | None = None
 
-    lmx_text: str | None = None
+    lmx_text = ""
     try:
         lmx_text = decode_tokens_to_lmx(pred_ids, tokenizer)
         save_text(lmx_text, pred_lmx_path)
     except Exception as exc:  # noqa: BLE001
         lmx_error = str(exc)
         pred_lmx_path = None
-        lmx_text = None
 
-    if lmx_error is None and lmx_text is not None:
+    if lmx_error is None:
         try:
             xml_text = tokenizer.converter.delinearize(lmx_text)
             save_text(xml_text, pred_xml_path)
@@ -441,7 +443,7 @@ def convert_pred_to_lmx_and_xml(
     else:
         pred_xml_path = None
 
-    return pred_lmx_path, pred_xml_path, lmx_error, xml_error, lmx_text
+    return pred_lmx_path, pred_xml_path, lmx_error, xml_error
 
 
 # =========================
@@ -560,8 +562,7 @@ def run_inference_on_eval_dataset(
                             variant=sample.variant,
                             pred_lmx_path=None,
                             pred_xml_path=None,
-                            pred_lmx_text=None,
-                            gt_lmx_text=None,
+                            gt_lmx_path=sample.gt_lmx_path,
                             gt_xml_path=sample.gt_xml_path,
                             lmx_error=generation_error,
                             xml_error=generation_error,
@@ -584,8 +585,7 @@ def run_inference_on_eval_dataset(
                             variant=sample.variant,
                             pred_lmx_path=None,
                             pred_xml_path=None,
-                            pred_lmx_text=None,
-                            gt_lmx_text=None,
+                            gt_lmx_path=sample.gt_lmx_path,
                             gt_xml_path=sample.gt_xml_path,
                             lmx_error=f"Failed to parse generated tokens: {exc}",
                             xml_error=f"Failed to parse generated tokens: {exc}",
@@ -593,7 +593,7 @@ def run_inference_on_eval_dataset(
                     )
                     continue
 
-                pred_lmx_path, pred_xml_path, lmx_error, xml_error, pred_lmx_text = convert_pred_to_lmx_and_xml(
+                pred_lmx_path, pred_xml_path, lmx_error, xml_error = convert_pred_to_lmx_and_xml(
                     pred_ids,
                     tokenizer=tokenizer,
                     sample_id=sample.sample_id,
@@ -601,29 +601,13 @@ def run_inference_on_eval_dataset(
                     xml_dir=xml_dir,
                 )
 
-                gt_lmx_text: str | None = None
-                if sample.gt_lmx_ids is not None:
-                    try:
-                        gt_ids = trim_token_ids(
-                            list(sample.gt_lmx_ids),
-                            bos_token_id=bos_token_id,
-                            eos_token_id=eos_token_id,
-                            pad_token_id=pad_token_id,
-                        )
-                        gt_lmx_text = decode_tokens_to_lmx(gt_ids, tokenizer)
-                    except Exception as exc:  # noqa: BLE001
-                        gt_lmx_text = None
-                        if lmx_error is None:
-                            lmx_error = f"Failed to decode GT LMX: {exc}"
-
                 records.append(
                     PredictionRecord(
                         sample_id=sample.sample_id,
                         variant=sample.variant,
                         pred_lmx_path=pred_lmx_path,
                         pred_xml_path=pred_xml_path,
-                        pred_lmx_text=pred_lmx_text,
-                        gt_lmx_text=gt_lmx_text,
+                        gt_lmx_path=sample.gt_lmx_path,
                         gt_xml_path=sample.gt_xml_path,
                         lmx_error=lmx_error,
                         xml_error=xml_error,
@@ -661,53 +645,6 @@ def _append_to_group(
         grouped[variant].append(result)
 
 
-def evaluate_lmx_text_pair(pred_lmx_text: str, gt_lmx_text: str, sample_id: str) -> dict[str, Any]:
-    pred_tokens = pred_lmx_text.split() if pred_lmx_text else []
-    gt_tokens = gt_lmx_text.split() if gt_lmx_text else []
-
-    exact_match = int(pred_tokens == gt_tokens)
-    seq_scores = normalized_edit_distance(pred_tokens, gt_tokens)
-
-    pred_measures = split_lmx_by_measure(pred_tokens)
-    gt_measures = split_lmx_by_measure(gt_tokens)
-
-    total_measures = max(len(pred_measures), len(gt_measures))
-    strict_correct = 0
-    measure_edit_values: list[float] = []
-
-    for i in range(total_measures):
-        pred_m = pred_measures[i] if i < len(pred_measures) else []
-        gt_m = gt_measures[i] if i < len(gt_measures) else []
-
-        if pred_m == gt_m:
-            strict_correct += 1
-
-        med = normalized_edit_distance(pred_m, gt_m)["normalized_edit_distance"]
-        measure_edit_values.append(med)
-
-    strict_measure_accuracy = (
-        strict_correct / total_measures if total_measures > 0 else 0.0
-    )
-    avg_measure_edit_distance = (
-        sum(measure_edit_values) / len(measure_edit_values)
-        if measure_edit_values
-        else 0.0
-    )
-
-    return {
-        "file": sample_id,
-        "lmx_num_pred_tokens": len(pred_tokens),
-        "lmx_num_gt_tokens": len(gt_tokens),
-        "lmx_exact_match": exact_match,
-        "lmx_edit_distance": seq_scores["edit_distance"],
-        "lmx_normalized_edit_distance": seq_scores["normalized_edit_distance"],
-        "lmx_num_pred_measures": len(pred_measures),
-        "lmx_num_gt_measures": len(gt_measures),
-        "lmx_measure_strict_accuracy": strict_measure_accuracy,
-        "lmx_measure_avg_edit_distance": avg_measure_edit_distance,
-    }
-
-
 def evaluate_records(records: list[PredictionRecord]) -> dict[str, Any]:
     group_names = ["overall", *KNOWN_VARIANTS]
 
@@ -731,18 +668,16 @@ def evaluate_records(records: list[PredictionRecord]) -> dict[str, Any]:
         groups = record_groups(record.variant)
 
         has_lmx_pair = (
-            record.pred_lmx_text is not None
-            and record.gt_lmx_text is not None
+            record.pred_lmx_path is not None
+            and record.gt_lmx_path is not None
+            and record.pred_lmx_path.exists()
+            and record.gt_lmx_path.exists()
         )
         if has_lmx_pair:
             for group in groups:
                 lmx_available_counter[group] += 1
             try:
-                result = evaluate_lmx_text_pair(
-                    record.pred_lmx_text,
-                    record.gt_lmx_text,
-                    record.sample_id,
-                )
+                result = evaluate_lmx_pair(str(record.pred_lmx_path), str(record.gt_lmx_path))
                 result["id"] = record.sample_id
                 result["variant"] = record.variant
                 _append_to_group(grouped_lmx_results, record.variant, result)
