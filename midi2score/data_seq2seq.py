@@ -354,6 +354,15 @@ def collate_seq2seq_batch(
         padding_value=pad_token_id,
     )
 
+    if decoder_tokens.size(1) < 2:
+        pad_column = torch.full(
+            (decoder_tokens.size(0), 2 - decoder_tokens.size(1)),
+            pad_token_id,
+            dtype=decoder_tokens.dtype,
+            device=decoder_tokens.device,
+        )
+        decoder_tokens = torch.cat([decoder_tokens, pad_column], dim=1)
+
     # shift right
     decoder_input = decoder_tokens[:, :-1].clone()
 

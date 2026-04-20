@@ -296,7 +296,7 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
         total_steps = int(self.trainer.estimated_stepping_batches)
         print(f"Estimated total training steps: {total_steps}")
 
-        warmup_steps = max(1, math.ceil(total_steps * self.training_config.warmup_ratio))
+        warmup_steps = max(0, math.ceil(total_steps * self.training_config.warmup_ratio))
         print(
             f"Warmup ratio: {self.training_config.warmup_ratio:.4f} -> "
             f"warmup steps: {warmup_steps}"

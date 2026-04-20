@@ -196,6 +196,11 @@ class TransformerForConditionalGeneration(nn.Module):
             decoder_padding_mask=decoder_padding_mask,
         )
 
+        # If all labels are ignored (e.g., ultra-short targets), avoid NaN from mean reduction.
+        if labels.ne(-100).sum() == 0:
+            zero_loss = logits.sum() * 0.0
+            return zero_loss, logits
+
         loss = torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             labels.reshape(-1),
@@ -225,69 +230,74 @@ class TransformerForConditionalGeneration(nn.Module):
         Returns:
             generated_tokens: [B, T_gen]
         """
+        was_training = self.training
         self.eval()
-        with torch.no_grad():
-            device = encoder_input_tokens.device
-            config = self.config.decoder_config
+        try:
+            with torch.no_grad():
+                device = encoder_input_tokens.device
+                config = self.config.decoder_config
 
-            if max_length is None:
-                max_length = config.max_length
+                if max_length is None:
+                    max_length = config.max_length
 
-            if encoder_padding_mask is not None:
-                if encoder_padding_mask.dim() == 3:
-                    encoder_padding_mask = encoder_padding_mask[..., 0]
-                encoder_padding_mask = encoder_padding_mask.to(torch.bool)
+                if encoder_padding_mask is not None:
+                    if encoder_padding_mask.dim() == 3:
+                        encoder_padding_mask = encoder_padding_mask[..., 0]
+                    encoder_padding_mask = encoder_padding_mask.to(torch.bool)
 
-            batch_size = encoder_input_tokens.size(0)
+                batch_size = encoder_input_tokens.size(0)
 
-            bos_token_id = config.bos_token_id
-            eos_token_id = config.eos_token_id
-            pad_token_id = config.pad_token_id
+                bos_token_id = config.bos_token_id
+                eos_token_id = config.eos_token_id
+                pad_token_id = config.pad_token_id
 
-            memory = self.model.encoder(
-                encoder_input_tokens,
-                padding_mask=encoder_padding_mask,
-            )
-
-            generated = torch.full(
-                (batch_size, 1),
-                bos_token_id,
-                dtype=torch.long,
-                device=device,
-            )
-
-            finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
-            past_key_values = None
-
-            for _ in range(max_length):
-                decoder_tokens = generated if past_key_values is None else generated[:, -1:]
-                logits, past_key_values = self.model.decoder(
-                    decoder_tokens,
-                    memory=memory,
-                    memory_padding_mask=encoder_padding_mask,
-                    past_key_values=past_key_values,
-                    use_cache=True,
+                memory = self.model.encoder(
+                    encoder_input_tokens,
+                    padding_mask=encoder_padding_mask,
                 )
 
-                next_token_logits = logits[:, -1, :]
+                generated = torch.full(
+                    (batch_size, 1),
+                    bos_token_id,
+                    dtype=torch.long,
+                    device=device,
+                )
 
-                if temperature != 1.0:
-                    next_token_logits = next_token_logits / temperature
+                finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+                past_key_values = None
 
-                if top_k is not None:
-                    current_top_k = min(top_k, next_token_logits.size(-1))
-                    values, indices = torch.topk(next_token_logits, current_top_k)
-                    probs = torch.zeros_like(next_token_logits).scatter_(1, indices, torch.softmax(values, dim=-1))
-                else:
-                    probs = torch.softmax(next_token_logits, dim=-1)
+                for _ in range(max_length):
+                    decoder_tokens = generated if past_key_values is None else generated[:, -1:]
+                    logits, past_key_values = self.model.decoder(
+                        decoder_tokens,
+                        memory=memory,
+                        memory_padding_mask=encoder_padding_mask,
+                        past_key_values=past_key_values,
+                        use_cache=True,
+                    )
 
-                next_tokens = torch.multinomial(probs, num_samples=1)
-                next_tokens = next_tokens.masked_fill(finished.unsqueeze(-1), pad_token_id)
+                    next_token_logits = logits[:, -1, :]
 
-                generated = torch.cat([generated, next_tokens], dim=1)
-                finished = finished | (next_tokens.squeeze(-1) == eos_token_id)
+                    if temperature != 1.0:
+                        next_token_logits = next_token_logits / temperature
 
-                if finished.all():
-                    break
+                    if top_k is not None:
+                        current_top_k = min(top_k, next_token_logits.size(-1))
+                        values, indices = torch.topk(next_token_logits, current_top_k)
+                        probs = torch.zeros_like(next_token_logits).scatter_(1, indices, torch.softmax(values, dim=-1))
+                    else:
+                        probs = torch.softmax(next_token_logits, dim=-1)
 
-            return generated
+                    next_tokens = torch.multinomial(probs, num_samples=1)
+                    next_tokens = next_tokens.masked_fill(finished.unsqueeze(-1), pad_token_id)
+
+                    generated = torch.cat([generated, next_tokens], dim=1)
+                    finished = finished | (next_tokens.squeeze(-1) == eos_token_id)
+
+                    if finished.all():
+                        break
+
+                return generated
+        finally:
+            if was_training:
+                self.train()
