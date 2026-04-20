@@ -1,35 +1,34 @@
 model:
+  encoder:
+    d_model: 512
+    nhead: 8
+    num_layers: 8
+    dim_feedforward: 2048
+    dropout: 0.1
+    activation: gelu
+    position_encoding_type: rope
+    pad_token_id: 0
+    bos_token_id: 1
+    eos_token_id: 2
+    max_length: 1024
+
+    # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
+    src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
+    src_embedding_size_list: [8, 64, 64, 64, 32, 32, 32]
+
   decoder:
     vocab_size: 5000
     d_model: 512
     nhead: 8
     num_layers: 4
     dim_feedforward: 2048
-    dropout: 0.05
-    activation: swiglu
+    dropout: 0.1
+    activation: gelu
+    positional_encoding: rope
     pad_token_id: 0
     bos_token_id: 1
     eos_token_id: 2
     max_length: 1024
-    positional_encoding: "rope"
-  
-  encoder:
-    d_model: 512
-    nhead: 8
-    num_layers: 8
-    dim_feedforward: 2048
-    dropout: 0.05
-    activation: "swiglu"
-    max_length: 1024
-    position_encoding_type: "rope"
-
-    # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
-    src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
-    src_embedding_size_list: [8, 64, 64, 64, 32, 32, 32]
-
-    pad_token_id: 0
-    bos_token_id: 1
-    eos_token_id: 2
 
 data:
   dataset_path: DATA/huggingface_seq2seq_truncated
@@ -52,16 +51,16 @@ data:
 
   curriculum_stage_prob: 
     - [1.0, 0.0, 0.0]
-    - [0.25, 0.75, 0.0]
-    - [0.2, 0.3, 0.5] 
+    - [0.4, 0.4, 0.2]
+    - [0.2, 0.3, 0.5]
 
 training:
   # ===== pretrained decoder =====
-  pretrained_decoder_path: DATA/qkv_rope_normfix.pt
+  pretrained_decoder_path: DATA/pre_trained_decoder.pt
 
   # ===== batch & optimizer =====
-  batch_size: 16
-  accumulate_grad_batches: 8
+  batch_size: 48
+  accumulate_grad_batches: 3
   precision: bf16-mixed
   learning_rate: 0.0003
   weight_decay: 0.1
@@ -71,25 +70,25 @@ training:
 
   # ===== scheduler =====
   scheduler: cosine
-  warmup_ratio: 0.05
+  warmup_ratio: 0.02
   min_lr_ratio: 0.1
 
   # ===== training =====
   num_steps: null
-  num_epochs: 10
-  max_duration_seconds: null
+  num_epochs: 24
+  max_duration_seconds: 10800
 
   # ===== eval =====
-  val_check_interval: 500
-  check_val_every_n_epoch: null
-  num_eval_batches: 16
+  val_check_interval: 1.0
+  check_val_every_n_epoch: 1
+  num_eval_batches: 1.0
 
   early_stopping_patience: null
   early_stopping_min_delta: 0.0
 
   # ===== logging =====
   log_every: 100
-    random_seed: 42
+  random_seed: 42
 
   device: auto
 
@@ -113,4 +112,4 @@ training:
 
   # ===== Curriculum Scheduling =====
   curriculum_learning: true
-  curriculum_epoch_schedule: [0, 3, 6]
+  curriculum_epoch_schedule: [0, 3, 8]
