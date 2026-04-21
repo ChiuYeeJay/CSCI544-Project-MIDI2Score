@@ -216,19 +216,12 @@ class TransformerForConditionalGeneration(nn.Module):
         max_length: int | None = None,
         temperature: float = 1.0,
         top_k: int | None = None,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
+        do_sample: bool = True,
     ):
         """
-        Autoregressive generation for seq2seq model.
-
-        Args:
-            encoder_input_tokens: [B, T_src, ...]
-            encoder_padding_mask: [B, T_src]
-            max_length: max generation length
-            temperature: sampling temperature
-            top_k: optional top-k sampling
-
-        Returns:
-            generated_tokens: [B, T_gen]
+        Autoregressive generation for seq2seq model with advanced decoding strategies.
         """
         was_training = self.training
         self.eval()
@@ -278,17 +271,38 @@ class TransformerForConditionalGeneration(nn.Module):
 
                     next_token_logits = logits[:, -1, :]
 
-                    if temperature != 1.0:
+                    if repetition_penalty != 1.0:
+                        score = torch.gather(next_token_logits, 1, generated)
+                        score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
+                        next_token_logits.scatter_(1, generated, score)
+
+                    if temperature != 1.0 and temperature > 0:
                         next_token_logits = next_token_logits / temperature
 
-                    if top_k is not None:
+                    if top_k is not None and top_k > 0:
                         current_top_k = min(top_k, next_token_logits.size(-1))
-                        values, indices = torch.topk(next_token_logits, current_top_k)
-                        probs = torch.zeros_like(next_token_logits).scatter_(1, indices, torch.softmax(values, dim=-1))
-                    else:
-                        probs = torch.softmax(next_token_logits, dim=-1)
+                        indices_to_remove = next_token_logits < torch.topk(next_token_logits, current_top_k)[0][..., -1, None]
+                        next_token_logits[indices_to_remove] = -float('Inf')
 
-                    next_tokens = torch.multinomial(probs, num_samples=1)
+                    if top_p < 1.0:
+                        sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                        cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+
+                        sorted_indices_to_remove = cumulative_probs > top_p
+                        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                        sorted_indices_to_remove[..., 0] = 0
+
+                        indices_to_remove = torch.zeros_like(next_token_logits, dtype=torch.bool).scatter_(
+                            dim=-1, index=sorted_indices, src=sorted_indices_to_remove
+                        )
+                        next_token_logits[indices_to_remove] = -float('Inf')
+
+                    if do_sample:
+                        probs = torch.softmax(next_token_logits, dim=-1)
+                        next_tokens = torch.multinomial(probs, num_samples=1)
+                    else:
+                        next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+
                     next_tokens = next_tokens.masked_fill(finished.unsqueeze(-1), pad_token_id)
 
                     generated = torch.cat([generated, next_tokens], dim=1)
