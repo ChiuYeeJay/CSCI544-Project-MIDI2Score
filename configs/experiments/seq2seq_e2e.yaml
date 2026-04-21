@@ -1,0 +1,115 @@
+model:
+  encoder:
+    d_model: 512
+    nhead: 8
+    num_layers: 8
+    dim_feedforward: 2048
+    dropout: 0.1
+    activation: gelu
+    position_encoding_type: rope
+    pad_token_id: 0
+    bos_token_id: 1
+    eos_token_id: 2
+    max_length: 1024
+
+    # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
+    src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
+    src_embedding_size_list: [8, 64, 64, 64, 32, 32, 32]
+
+  decoder:
+    vocab_size: 5000
+    d_model: 512
+    nhead: 8
+    num_layers: 4
+    dim_feedforward: 2048
+    dropout: 0.1
+    activation: gelu
+    positional_encoding: rope
+    pad_token_id: 0
+    bos_token_id: 1
+    eos_token_id: 2
+    max_length: 1024
+
+data:
+  dataset_path: DATA/huggingface_seq2seq_truncated
+
+  max_source_length: 1024
+  max_target_length: 1024
+
+  tokenizer_path: DATA/tokenizer_rd.json
+
+  length_bucketing: true
+  bucket_size_multiplier: 50
+  bucketing_mode: mixed
+  source_length_weight: 0.2
+
+  num_workers: 4
+
+  pad_token_id: 0
+  bos_token_id: 1
+  eos_token_id: 2
+
+  curriculum_stage_prob: 
+    - [1.0, 0.0, 0.0]
+    - [0.4, 0.4, 0.2]
+    - [0.2, 0.3, 0.5]
+
+training:
+  # ===== pretrained decoder =====
+  pretrained_decoder_path: null
+
+  # ===== batch & optimizer =====
+  batch_size: 48
+  accumulate_grad_batches: 3
+  precision: bf16-mixed
+  learning_rate: 0.0003
+  weight_decay: 0.1
+  grad_clip_norm: 1.0
+
+  label_smoothing: 0.0
+
+  # ===== scheduler =====
+  scheduler: cosine
+  warmup_ratio: 0.02
+  min_lr_ratio: 0.1
+
+  # ===== training =====
+  num_steps: null
+  num_epochs: 16
+  max_duration_seconds: 7200
+
+  # ===== eval =====
+  val_check_interval: 1.0
+  check_val_every_n_epoch: 1
+  num_eval_batches: 1.0
+
+  early_stopping_patience: null
+  early_stopping_min_delta: 0.0
+
+  # ===== logging =====
+  log_every: 100
+  random_seed: 42
+
+  device: auto
+
+  # ===== checkpoint =====
+  save_checkpoint_path: artifacts/seq2seq/latest.pt
+  save_best_checkpoint_path: artifacts/seq2seq/best.pt
+  resume_checkpoint_path: null
+
+  # ===== logs =====
+  log_dir: logs/
+  use_wandb_logger: false
+  wandb_project: CSCI544-Project-MIDI-to-Score
+  wandb_name: null
+
+  # ===== Training strategy =====
+  training_mode: end_to_end
+  decoder_pretrained_learning_rate: null
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+  # ===== Curriculum Scheduling =====
+  curriculum_learning: true
+  curriculum_epoch_schedule: [0, 3, 8]

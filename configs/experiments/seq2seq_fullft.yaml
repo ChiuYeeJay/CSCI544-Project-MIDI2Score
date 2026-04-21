@@ -33,8 +33,8 @@ model:
 data:
   dataset_path: DATA/huggingface_seq2seq_truncated
 
-  max_source_length: 128
-  max_target_length: 128
+  max_source_length: 1024
+  max_target_length: 1024
 
   tokenizer_path: DATA/tokenizer_rd.json
 
@@ -43,7 +43,7 @@ data:
   bucketing_mode: mixed
   source_length_weight: 0.2
 
-  num_workers: 0
+  num_workers: 4
 
   pad_token_id: 0
   bos_token_id: 1
@@ -59,8 +59,8 @@ training:
   pretrained_decoder_path: DATA/pre_trained_decoder.pt
 
   # ===== batch & optimizer =====
-  batch_size: 2
-  accumulate_grad_batches: 1
+  batch_size: 48
+  accumulate_grad_batches: 3
   precision: bf16-mixed
   learning_rate: 0.0003
   weight_decay: 0.1
@@ -74,14 +74,14 @@ training:
   min_lr_ratio: 0.1
 
   # ===== training =====
-  num_steps: 200
-  num_epochs: null
-  max_duration_seconds: 10800
+  num_steps: null
+  num_epochs: 16
+  max_duration_seconds: 7200
 
   # ===== eval =====
-  val_check_interval: 50
-  check_val_every_n_epoch: null
-  num_eval_batches: 8
+  val_check_interval: 1.0
+  check_val_every_n_epoch: 1
+  num_eval_batches: 1.0
 
   early_stopping_patience: null
   early_stopping_min_delta: 0.0
@@ -104,8 +104,8 @@ training:
   wandb_name: null
 
   # ===== Training strategy =====
-  training_mode: lora
-  decoder_pretrained_learning_rate: null
+  training_mode: full_ft
+  decoder_pretrained_learning_rate: 0.00003
   lora_r: 16
   lora_alpha: 32
   lora_dropout: 0.05
