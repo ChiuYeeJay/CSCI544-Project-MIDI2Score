@@ -70,13 +70,13 @@ training:
 
   # ===== scheduler =====
   scheduler: cosine
-  warmup_ratio: 0.02
+  warmup_ratio: 0.1
   min_lr_ratio: 0.1
 
   # ===== training =====
   num_steps: null
   num_epochs: 16
-  max_duration_seconds: 7200
+  max_duration_seconds: 10500
 
   # ===== eval =====
   val_check_interval: 1.0
