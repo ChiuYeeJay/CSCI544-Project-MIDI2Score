@@ -461,6 +461,8 @@ def run_inference_on_eval_dataset(
     max_target_length: int,
     temperature: float = 1.0,
     top_k: int | None = 1,
+    top_p: float | None = None,
+    repetition_penalty: float = 1.0,
     dtype_mode: str = "auto",
     length_bucketing: bool = True,
 ) -> InferenceArtifacts:
@@ -525,6 +527,8 @@ def run_inference_on_eval_dataset(
     print(f"[INFO] max_target_len  = {max_target_length}")
     print(f"[INFO] temperature     = {temperature}")
     print(f"[INFO] top_k           = {top_k}")
+    print(f"[INFO] top_p           = {top_p}")
+    print(f"[INFO] repetition_penalty = {repetition_penalty}")
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -550,6 +554,8 @@ def run_inference_on_eval_dataset(
                         max_length=max_target_length,
                         temperature=temperature,
                         top_k=top_k,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
                     )
             except Exception as exc:  # noqa: BLE001
                 generation_error = f"Generation failed: {exc}"
@@ -875,6 +881,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         top_k=args.top_k,
         dtype_mode=args.dtype,
         length_bucketing=not args.disable_length_bucketing,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
     )
 
     evaluation_payload = evaluate_records(inference_artifacts.records, onset_tol=args.onset_tol, duration_tol=args.duration_tol)
@@ -942,6 +950,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=1)
+    parser.add_argument("--top-p", type=float, default=None)
+    parser.add_argument("--repetition-penalty", type=float, default=1.0)
     parser.add_argument("--onset-tol", type=float, default=0.0)
     parser.add_argument("--duration-tol", type=float, default=0.0)
 
@@ -958,5 +968,9 @@ if __name__ == "__main__":
         raise ValueError("--max-source-length must be positive")
     if args.max_target_length is not None and args.max_target_length <= 0:
         raise ValueError("--max-target-length must be positive")
+    if args.top_p is not None and not 0 <= args.top_p <= 1:
+        raise ValueError("--top-p must be a float between 0 and 1")
+    if args.repetition_penalty is not None and args.repetition_penalty <= 0:
+        raise ValueError("--repetition-penalty must be a positive float")
 
     run_pipeline(args)
