@@ -22,9 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from midi2score.model_seq2seq import TransformerForConditionalGeneration
 from midi2score.config import load_seq2seq_config
 from evaluation import (
-    aggregate_lmx_results,
     aggregate_xml_results,
-    evaluate_lmx_pair,
     evaluate_xml_pair,
 )
 
@@ -463,8 +461,6 @@ def run_inference_on_eval_dataset(
     max_target_length: int,
     temperature: float = 1.0,
     top_k: int | None = 1,
-    top_p: float | None = None,
-    repetition_penalty: float = 1.0,
     dtype_mode: str = "auto",
     length_bucketing: bool = True,
 ) -> InferenceArtifacts:
@@ -529,8 +525,6 @@ def run_inference_on_eval_dataset(
     print(f"[INFO] max_target_len  = {max_target_length}")
     print(f"[INFO] temperature     = {temperature}")
     print(f"[INFO] top_k           = {top_k}")
-    print(f"[INFO] top_p           = {top_p}")
-    print(f"[INFO] repetition_penalty = {repetition_penalty}")
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -556,8 +550,6 @@ def run_inference_on_eval_dataset(
                         max_length=max_target_length,
                         temperature=temperature,
                         top_k=top_k,
-                        top_p=top_p,
-                        repetition_penalty=repetition_penalty,
                     )
             except Exception as exc:  # noqa: BLE001
                 generation_error = f"Generation failed: {exc}"
@@ -651,18 +643,15 @@ def _append_to_group(
         grouped[variant].append(result)
 
 
-def evaluate_records(records: list[PredictionRecord]) -> dict[str, Any]:
+def evaluate_records(records: list[PredictionRecord],*,onset_tol: float = 0.0,duration_tol: float = 0.0,) -> dict[str, Any]:
     group_names = ["overall", *KNOWN_VARIANTS]
 
-    grouped_lmx_results: dict[str, list[dict[str, Any]]] = defaultdict(list)
     grouped_xml_results: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-    lmx_failures: list[dict[str, str]] = []
     xml_failures: list[dict[str, str]] = []
-    lmx_failures_by_group: dict[str, list[dict[str, str]]] = {k: [] for k in group_names}
+
     xml_failures_by_group: dict[str, list[dict[str, str]]] = {k: [] for k in group_names}
 
-    lmx_available_counter: Counter[str] = Counter()
     xml_available_counter: Counter[str] = Counter()
 
     def record_groups(variant: str) -> list[str]:
@@ -673,25 +662,6 @@ def evaluate_records(records: list[PredictionRecord]) -> dict[str, Any]:
     for record in tqdm(records, desc="Evaluating records"):
         groups = record_groups(record.variant)
 
-        has_lmx_pair = (
-            record.pred_lmx_path is not None
-            and record.gt_lmx_path is not None
-            and record.pred_lmx_path.exists()
-            and record.gt_lmx_path.exists()
-        )
-        if has_lmx_pair:
-            for group in groups:
-                lmx_available_counter[group] += 1
-            try:
-                result = evaluate_lmx_pair(str(record.pred_lmx_path), str(record.gt_lmx_path))
-                result["id"] = record.sample_id
-                result["variant"] = record.variant
-                _append_to_group(grouped_lmx_results, record.variant, result)
-            except Exception as exc:  # noqa: BLE001
-                failure = {"id": record.sample_id, "error": str(exc)}
-                lmx_failures.append(failure)
-                for group in groups:
-                    lmx_failures_by_group[group].append(failure)
 
         has_xml_pair = (
             record.pred_xml_path is not None
@@ -703,7 +673,7 @@ def evaluate_records(records: list[PredictionRecord]) -> dict[str, Any]:
             for group in groups:
                 xml_available_counter[group] += 1
             try:
-                result = evaluate_xml_pair(str(record.pred_xml_path), str(record.gt_xml_path))
+                result = evaluate_xml_pair(str(record.pred_xml_path),str(record.gt_xml_path),onset_tol=onset_tol,duration_tol=duration_tol,)
                 result["id"] = record.sample_id
                 result["variant"] = record.variant
                 _append_to_group(grouped_xml_results, record.variant, result)
@@ -712,20 +682,12 @@ def evaluate_records(records: list[PredictionRecord]) -> dict[str, Any]:
                 xml_failures.append(failure)
                 for group in groups:
                     xml_failures_by_group[group].append(failure)
-
-    lmx_payload: dict[str, Any] = {}
     xml_payload: dict[str, Any] = {}
 
     for group in group_names:
-        lmx_results = grouped_lmx_results.get(group, [])
+
         xml_results = grouped_xml_results.get(group, [])
 
-        lmx_payload[group] = {
-            "summary": aggregate_lmx_results(lmx_results),
-            "num_available_pairs": int(lmx_available_counter.get(group, 0)),
-            "num_evaluated_pairs": len(lmx_results),
-            "failures": lmx_failures_by_group[group],
-        }
 
         xml_payload[group] = {
             "summary": aggregate_xml_results(xml_results),
@@ -735,10 +697,8 @@ def evaluate_records(records: list[PredictionRecord]) -> dict[str, Any]:
         }
 
     return {
-        "lmx": lmx_payload,
         "xml": xml_payload,
         "global_failures": {
-            "lmx": lmx_failures,
             "xml": xml_failures,
         },
     }
@@ -781,13 +741,14 @@ def write_evaluation_logs(
     top_k: int | None,
     dtype_mode: str,
     length_bucketing: bool,
+    onset_tol: float,
+    duration_tol: float,
     inference_artifacts: InferenceArtifacts,
     evaluation_payload: dict[str, Any],
 ) -> None:
     txt_path = output_root / "evaluation.txt"
     json_path = output_root / "evaluation.json"
 
-    generation_fail_lmx = sum(1 for r in inference_artifacts.records if r.lmx_error is not None)
     generation_fail_xml = sum(1 for r in inference_artifacts.records if r.xml_error is not None)
 
     lines: list[str] = []
@@ -806,24 +767,21 @@ def write_evaluation_logs(
     lines.append(f"top_k: {top_k}")
     lines.append(f"dtype_mode: {dtype_mode}")
     lines.append(f"length_bucketing: {length_bucketing}")
+    lines.append(f"onset_tol: {onset_tol}")
+    lines.append(f"duration_tol: {duration_tol}")
     lines.append("")
 
     lines.append("[Generation Summary]")
     lines.append(f"num_samples: {len(inference_artifacts.records)}")
     lines.append(f"variant_counts: {inference_artifacts.variant_counter}")
-    lines.append(f"lmx_generation_failures: {generation_fail_lmx}")
     lines.append(f"xml_generation_failures: {generation_fail_xml}")
     if inference_artifacts.peak_memory_mb is not None:
         lines.append(f"peak_cuda_memory_mb: {inference_artifacts.peak_memory_mb:.2f}")
     lines.append("")
 
-    lines.extend(format_metrics_block("[LMX Metrics]", evaluation_payload["lmx"]))
-    lines.append("")
     lines.extend(format_metrics_block("[XML Metrics]", evaluation_payload["xml"]))
     lines.append("")
-
     lines.append("[Global Evaluation Failures]")
-    lines.append(f"lmx_failures: {len(evaluation_payload['global_failures']['lmx'])}")
     lines.append(f"xml_failures: {len(evaluation_payload['global_failures']['xml'])}")
 
     report_text = "\n".join(lines) + "\n"
@@ -844,13 +802,14 @@ def write_evaluation_logs(
             "top_k": top_k,
             "dtype_mode": dtype_mode,
             "length_bucketing": length_bucketing,
+            "onset_tol": onset_tol,
+            "duration_tol": duration_tol,
         },
         "generation": {
             "num_samples": len(inference_artifacts.records),
             "variant_counts": inference_artifacts.variant_counter,
             "peak_cuda_memory_mb": inference_artifacts.peak_memory_mb,
             "errors": {
-                "lmx_generation_failures": generation_fail_lmx,
                 "xml_generation_failures": generation_fail_xml,
             },
         },
@@ -916,11 +875,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
         top_k=args.top_k,
         dtype_mode=args.dtype,
         length_bucketing=not args.disable_length_bucketing,
-        top_p=args.top_p,
-        repetition_penalty=args.repetition_penalty,
     )
 
-    evaluation_payload = evaluate_records(inference_artifacts.records)
+    evaluation_payload = evaluate_records(inference_artifacts.records, onset_tol=args.onset_tol, duration_tol=args.duration_tol)
 
     write_evaluation_logs(
         output_root=output_root,
@@ -938,6 +895,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
         length_bucketing=not args.disable_length_bucketing,
         inference_artifacts=inference_artifacts,
         evaluation_payload=evaluation_payload,
+        onset_tol=args.onset_tol,
+        duration_tol=args.duration_tol,
+        
     )
 
 # =========================
@@ -982,8 +942,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=1)
-    parser.add_argument("--top-p", type=float, default=None)
-    parser.add_argument("--repetition-penalty", type=float, default=1.0)
+    parser.add_argument("--onset-tol", type=float, default=0.0)
+    parser.add_argument("--duration-tol", type=float, default=0.0)
 
     parser.add_argument("--dtype", choices=["auto", "bf16", "fp16", "fp32"], default="auto")
     parser.add_argument("--disable-length-bucketing", action="store_true")
@@ -998,9 +958,5 @@ if __name__ == "__main__":
         raise ValueError("--max-source-length must be positive")
     if args.max_target_length is not None and args.max_target_length <= 0:
         raise ValueError("--max-target-length must be positive")
-    if args.top_p is not None and not 0 <= args.top_p <= 1:
-        raise ValueError("--top-p must be a float between 0 and 1")
-    if args.repetition_penalty is not None and args.repetition_penalty <= 0:
-        raise ValueError("--repetition-penalty must be a positive float")
 
     run_pipeline(args)
