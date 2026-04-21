@@ -251,7 +251,7 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
                 label_smoothing=self.training_config.label_smoothing,
             )
 
-        self.log("train/loss", loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
