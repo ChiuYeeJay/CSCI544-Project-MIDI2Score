@@ -208,7 +208,7 @@ class LitSeq2Seq(TransformerForConditionalGeneration, L.LightningModule):
         other_group = []
 
         for name, param in trainable_named_parameters:
-            if name in self.pretrained_decoder_parameter_names:
+            if name in self.pretrained_decoder_parameter_names and "cross_attn" not in name:
                 pretrained_group.append(param)
             else:
                 other_group.append(param)
