@@ -431,6 +431,8 @@ def run_seq2seq_training_loop(
             shuffle=False,
             random_seed=training_config.random_seed,
         )
+        target_stage = len(training_config.curriculum_epoch_schedule) - 1
+        val_loader.dataset.set_stage(target_stage)
 
     # 2. 初始化模型
     model = LitSeq2Seq(model_config, training_config)
