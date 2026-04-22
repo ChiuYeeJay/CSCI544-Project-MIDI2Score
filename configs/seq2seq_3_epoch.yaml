@@ -24,7 +24,7 @@ model:
     position_encoding_type: rope
 
     # CPWord: family, position, pitch, duration, program (instrument), tempo, time signature
-    src_vocab_size_list: [3, 131, 130, 102, 131, 34, 66]
+    src_vocab_size_list: [5, 133, 132, 104, 133, 36, 68]
     src_embedding_size_list: [8, 64, 64, 64, 32, 32, 32]
 
     pad_token_id: 0

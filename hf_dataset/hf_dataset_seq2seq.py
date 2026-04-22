@@ -13,10 +13,10 @@ from tokenizer.midi_augmentation import apply_midi_augmentation
 # ==========================================
 # 1. Parameter and Path Configuration
 # ==========================================
-PDMX_PREPROCESSED_ROOT = "dataset/PDMX_preprocessed"
+PDMX_PREPROCESSED_ROOT = "dataset/PDMX_preprocessed_rd"
 CSV_PATH = os.path.join(PDMX_PREPROCESSED_ROOT, "dataset_info_with_partitions.csv")
-HF_OUTPUT_DIR = "dataset/huggingface_seq2seq"
-BPE_MODEL_PATH = "tokenizer/tokenizer.json"
+HF_OUTPUT_DIR = "dataset/huggingface_seq2seq_v3"
+BPE_MODEL_PATH = "tokenizer/tokenizer_rd.json"
 MAX_SEQ_LENGTH = 10000
 
 def main():
@@ -43,7 +43,7 @@ def main():
         use_pitchdrum_tokens=False,
         one_token_stream_for_programs=True,
         time_signature_range={beat_type: list(range(1, 17)) for beat_type in [2, 4, 8, 16]},
-        special_tokens=["PAD"],
+        special_tokens=["PAD", "BOS", "EOS"],
     )
 
     cpword_tokenizer = miditok.CPWord(miditok_config)

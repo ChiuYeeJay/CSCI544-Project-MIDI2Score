@@ -138,6 +138,15 @@ def decode_bpe_to_lmx_text(token_ids: list[int], tokenizer: MusicXMLTokenizer) -
     return lmx_text.strip()
 
 
+def strip_lmx_special_tokens(lmx_ids: list[int], bos_id: int, eos_id: int) -> list[int]:
+    if not lmx_ids:
+        return lmx_ids
+
+    start = 1 if lmx_ids[0] == bos_id else 0
+    end = len(lmx_ids) - 1 if len(lmx_ids) > start and lmx_ids[-1] == eos_id else len(lmx_ids)
+    return lmx_ids[start:end]
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
@@ -216,6 +225,12 @@ def main() -> None:
     tokenizer = MusicXMLTokenizer()
     tokenizer.load_bpe_model(str(args.tokenizer_path))
     tokenizer.eval_mode()
+    bos_id = tokenizer.bpe.bpe_tokenizer.bos_token_id
+    eos_id = tokenizer.bpe.bpe_tokenizer.eos_token_id
+    if bos_id is None or eos_id is None:
+        raise RuntimeError("Could not resolve LMX BOS/EOS IDs from tokenizer.")
+    bos_id = int(bos_id)
+    eos_id = int(eos_id)
 
     rows: list[dict[str, Any]] = []
     variant_counter: Counter[str] = Counter()
@@ -237,7 +252,7 @@ def main() -> None:
         midi_field = NOISE_FIELDS[selected_variant]
         selected_cpword_ids = row[midi_field]
 
-        lmx_ids = row["lmx_ids"]
+        lmx_ids = strip_lmx_special_tokens(row["lmx_ids"], bos_id=bos_id, eos_id=eos_id)
         cutoff = clamp_cutoff(int(row[f"lmx_cutoff_{selected_variant}"]), len(lmx_ids))
         selected_lmx_ids = lmx_ids[:cutoff]
 

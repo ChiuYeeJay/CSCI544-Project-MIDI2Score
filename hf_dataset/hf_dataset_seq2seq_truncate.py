@@ -13,6 +13,8 @@ from datasets import Dataset, DatasetDict, load_from_disk
 
 sys.path.append(".")
 from tokenizer.musicxml_tokenizer import MusicXMLTokenizer
+from tokenizer.cpword_tokenizer_config import cpword_tokenizer
+BAR_TOKEN = cpword_tokenizer.vocab[1]["Bar_None"]
 
 NOISE_FIELDS = {
     "clean": "midi_clean_ids",
@@ -74,6 +76,27 @@ def resolve_measure_start_ids(tokenizer_path: Path) -> set[int]:
     return ids
 
 
+def resolve_lmx_special_token_ids(tokenizer_path: Path) -> tuple[int, int]:
+    tokenizer = MusicXMLTokenizer()
+    tokenizer.load_bpe_model(str(tokenizer_path))
+
+    bos_id = tokenizer.bpe.bpe_tokenizer.bos_token_id
+    eos_id = tokenizer.bpe.bpe_tokenizer.eos_token_id
+    if bos_id is None or eos_id is None:
+        raise RuntimeError("Could not resolve LMX BOS/EOS IDs from tokenizer.")
+
+    return int(bos_id), int(eos_id)
+
+
+def strip_lmx_special_tokens(lmx_ids: list[int], bos_id: int, eos_id: int) -> list[int]:
+    if not lmx_ids:
+        return lmx_ids
+
+    start = 1 if lmx_ids[0] == bos_id else 0
+    end = len(lmx_ids) - 1 if len(lmx_ids) > start and lmx_ids[-1] == eos_id else len(lmx_ids)
+    return lmx_ids[start:end]
+
+
 def lmx_measure_starts(lmx_ids: list[int], lmx_measure_start_ids: set[int]) -> list[int]:
     starts = [idx for idx, token_id in enumerate(lmx_ids) if token_id in lmx_measure_start_ids]
     if not starts or starts[0] != 0:
@@ -84,7 +107,7 @@ def lmx_measure_starts(lmx_ids: list[int], lmx_measure_start_ids: set[int]) -> l
 def cpword_measure_starts(midi_ids: list[list[int]]) -> list[int]:
     starts: list[int] = []
     for idx, token in enumerate(midi_ids):
-        if isinstance(token, (list, tuple)) and len(token) > 1 and int(token[1]) == 2:
+        if isinstance(token, (list, tuple)) and len(token) > 1 and int(token[1]) == BAR_TOKEN:
             starts.append(idx)
 
     if not starts or starts[0] != 0:
@@ -159,6 +182,8 @@ def process_batch(
     examples: dict,
     *,
     lmx_measure_start_ids: set[int],
+    lmx_bos_id: int,
+    lmx_eos_id: int,
     max_source_length: int,
     max_target_length: int,
     lookahead_tokens_by_variant: dict[str, int],
@@ -181,7 +206,7 @@ def process_batch(
 
     n_examples = len(examples["lmx_ids"])
     for row_idx in range(n_examples):
-        lmx_ids = examples["lmx_ids"][row_idx]
+        lmx_ids = strip_lmx_special_tokens(examples["lmx_ids"][row_idx], lmx_bos_id, lmx_eos_id)
         cpword_dim = infer_cpword_dim(
             examples["midi_clean_ids"][row_idx],
             examples["midi_light_ids"][row_idx],
@@ -303,6 +328,8 @@ def main() -> None:
     print("=== Resolving LMX measure-start BPE token IDs ===")
     lmx_measure_start_ids = resolve_measure_start_ids(args.tokenizer_path)
     print(f"Detected {len(lmx_measure_start_ids)} measure-start BPE IDs")
+    lmx_bos_id, lmx_eos_id = resolve_lmx_special_token_ids(args.tokenizer_path)
+    print(f"Detected LMX BOS/EOS IDs: {lmx_bos_id}/{lmx_eos_id}")
 
     lookahead_by_variant = {
         "clean": 0 if args.lookahead_clean is None else args.lookahead_clean,
@@ -336,6 +363,8 @@ def main() -> None:
             process_batch,
             fn_kwargs={
                 "lmx_measure_start_ids": lmx_measure_start_ids,
+                "lmx_bos_id": lmx_bos_id,
+                "lmx_eos_id": lmx_eos_id,
                 "max_source_length": args.max_source_length,
                 "max_target_length": args.max_target_length,
                 "lookahead_tokens_by_variant": lookahead_by_variant,

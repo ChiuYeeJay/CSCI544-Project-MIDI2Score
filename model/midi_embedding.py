@@ -53,7 +53,7 @@ if __name__ == "__main__":
     test = ds["training"][0]["midi_clean_ids"]
     test = torch.LongTensor(np.array(test))
 
-    vocab_size_list = [3, 131, 130, 102, 131, 34, 66]
+    vocab_size_list = [5, 133, 132, 104, 133, 36, 68]
     embbed_size_list = [32, 384, 512, 256, 32, 32, 32]
     embedding_layer = CPWordEmbedding(vocab_size_list, embbed_size_list)
 

@@ -14,12 +14,58 @@ from torch.utils.data import BatchSampler, DataLoader, Dataset
 from pathlib import Path
 import json
 
+from tokenizer.cpword_tokenizer_config import cpword_tokenizer
+
 
 NOISE_FIELDS = {
     "clean": "midi_clean_ids",
     "light": "midi_light_ids",
     "heavy": "midi_heavy_ids",
 }
+
+
+def _strip_lmx_special_tokens(token_ids: list[int], bos_token_id: int, eos_token_id: int) -> list[int]:
+    if not token_ids:
+        return token_ids
+
+    start = 1 if token_ids[0] == bos_token_id else 0
+    end = len(token_ids) - 1 if len(token_ids) > start and token_ids[-1] == eos_token_id else len(token_ids)
+    return token_ids[start:end]
+
+
+def _strip_cpword_special_tokens(
+    token_ids: list[list[int]],
+    bos_token: list[int],
+    eos_token: list[int],
+) -> list[list[int]]:
+    if not token_ids:
+        return token_ids
+
+    start = 1 if list(token_ids[0]) == bos_token else 0
+    end = len(token_ids) - 1 if len(token_ids) > start and list(token_ids[-1]) == eos_token else len(token_ids)
+    return token_ids[start:end]
+
+
+def _resolve_cpword_bos_eos_tokens() -> tuple[list[int], list[int]]:
+    vocab = cpword_tokenizer.vocab
+    if not isinstance(vocab, list) or not vocab:
+        raise RuntimeError("CPWord tokenizer vocab is not in expected multi-vocabulary format.")
+
+    bos_token: list[int] = []
+    eos_token: list[int] = []
+    for dim_vocab in vocab:
+        if not isinstance(dim_vocab, dict):
+            raise RuntimeError("CPWord tokenizer dimension vocab is not a dictionary.")
+
+        bos_id = dim_vocab.get("BOS_None")
+        eos_id = dim_vocab.get("EOS_None")
+        if bos_id is None or eos_id is None:
+            raise RuntimeError("Failed to resolve CPWord BOS_None/EOS_None IDs.")
+
+        bos_token.append(int(bos_id))
+        eos_token.append(int(eos_id))
+
+    return bos_token, eos_token
 
 @dataclass(slots=True)
 class Seq2SeqDataConfig:
@@ -167,6 +213,9 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
 
         self.dataset: HFDataset = dataset_dict[self.split]
         self.noise_variants = ["clean", "light", "heavy"]
+        self.max_source_content_length = self.config.max_source_length - 2
+        self.max_target_content_length = self.config.max_target_length - 2
+        self.cpword_bos_token, self.cpword_eos_token = _resolve_cpword_bos_eos_tokens()
 
         required_columns = {
             "lmx_ids",
@@ -200,8 +249,12 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
             source_lengths = torch.tensor(self.dataset[source_length_field], dtype=torch.float32)
             target_lengths = torch.tensor(self.dataset[target_length_field], dtype=torch.float32)
 
-            self.source_length_tensors[variant] = source_lengths.clamp(max=float(config.max_source_length))
-            self.target_length_tensors[variant] = target_lengths.clamp(max=float(config.max_target_length))
+            self.source_length_tensors[variant] = source_lengths.clamp(
+                max=float(self.max_source_content_length)
+            )
+            self.target_length_tensors[variant] = target_lengths.clamp(
+                max=float(self.max_target_content_length)
+            )
 
         self.lengths: list[float] = []
         self.stage_probs: list[float] = []
@@ -223,12 +276,28 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
         lmx_cutoff = int(item[f"lmx_cutoff_{variant}"])
         lmx = lmx[:lmx_cutoff]
 
-        midi_trimmed = midi[:self.config.max_source_length]
-        lmx_trimmed = lmx[:self.config.max_target_length]
+        if midi and len(midi[0]) != len(self.cpword_bos_token):
+            raise ValueError(
+                f"Unexpected CPWord token width {len(midi[0])}, expected {len(self.cpword_bos_token)}"
+            )
+
+        midi = _strip_cpword_special_tokens(midi, self.cpword_bos_token, self.cpword_eos_token)
+        lmx = _strip_lmx_special_tokens(
+            lmx,
+            bos_token_id=self.config.bos_token_id,
+            eos_token_id=self.config.eos_token_id,
+        )
+
+        midi_trimmed = midi[:self.max_source_content_length]
+        lmx_trimmed = lmx[:self.max_target_content_length]
+
+        midi_with_specials = [self.cpword_bos_token, *midi_trimmed, self.cpword_eos_token]
+        lmx_with_specials = [self.config.bos_token_id, *lmx_trimmed, self.config.eos_token_id]
+
 
         return {
-            "encoder_tokens": torch.tensor(midi_trimmed, dtype=torch.long),
-            "decoder_tokens": torch.tensor(lmx_trimmed, dtype=torch.long),
+            "encoder_tokens": torch.tensor(midi_with_specials, dtype=torch.long),
+            "decoder_tokens": torch.tensor(lmx_with_specials, dtype=torch.long),
         }
     
     def set_stage(self, stage: int):
@@ -260,8 +329,8 @@ class HuggingFaceSeq2SeqDataset(Dataset[Seq2SeqExample]):
         expected_target = torch.zeros(n_items, dtype=torch.float32)
 
         for prob, variant in zip(self.stage_probs, self.noise_variants):
-            expected_source += float(prob) * self.source_length_tensors[variant]
-            expected_target += float(prob) * self.target_length_tensors[variant]
+            expected_source += float(prob) * (self.source_length_tensors[variant] + 2.0)
+            expected_target += float(prob) * (self.target_length_tensors[variant] + 2.0)
 
         if self.config.bucketing_mode == "target_only":
             bucket_lengths = expected_target

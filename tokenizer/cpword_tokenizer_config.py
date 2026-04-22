@@ -14,7 +14,7 @@ miditok_config = miditok.TokenizerConfig(
     use_pitchdrum_tokens=False,
     one_token_stream_for_programs=True,
     time_signature_range={beat_type: list(range(1, 17)) for beat_type in [2, 4, 8, 16]},
-    special_tokens=["PAD"],
+    special_tokens=["PAD", "BOS", "EOS"],
 )
 
 cpword_tokenizer = miditok.CPWord(miditok_config)

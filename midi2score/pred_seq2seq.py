@@ -26,6 +26,7 @@ from evaluation import (
     evaluate_xml_pair,
 )
 
+from tokenizer.cpword_tokenizer_config import cpword_tokenizer
 from tokenizer.musicxml_tokenizer import MusicXMLTokenizer
 
 KNOWN_VARIANTS = ("clean", "light", "heavy")
@@ -124,6 +125,42 @@ def decode_tokens_to_lmx(token_ids: list[int], tokenizer: MusicXMLTokenizer) -> 
     byte_str = tokenizer.bpe.decode(token_ids)
     text = tokenizer.mapper.decode_to_lmx(byte_str)
     return text.strip()
+
+
+def resolve_cpword_bos_eos_tokens() -> tuple[list[int], list[int]]:
+    vocab = cpword_tokenizer.vocab
+    if not isinstance(vocab, list) or not vocab:
+        raise RuntimeError("CPWord tokenizer vocab is not in expected multi-vocabulary format.")
+
+    bos_token: list[int] = []
+    eos_token: list[int] = []
+    for dim_vocab in vocab:
+        if not isinstance(dim_vocab, dict):
+            raise RuntimeError("CPWord tokenizer dimension vocab is not a dictionary.")
+
+        bos_id = dim_vocab.get("BOS_None")
+        eos_id = dim_vocab.get("EOS_None")
+        if bos_id is None or eos_id is None:
+            raise RuntimeError("Failed to resolve CPWord BOS_None/EOS_None IDs.")
+
+        bos_token.append(int(bos_id))
+        eos_token.append(int(eos_id))
+
+    return bos_token, eos_token
+
+
+def strip_cpword_special_tokens(
+    token_ids: list[list[int]],
+    *,
+    bos_token: list[int],
+    eos_token: list[int],
+) -> list[list[int]]:
+    if not token_ids:
+        return token_ids
+
+    start = 1 if list(token_ids[0]) == bos_token else 0
+    end = len(token_ids) - 1 if len(token_ids) > start and list(token_ids[-1]) == eos_token else len(token_ids)
+    return token_ids[start:end]
 
 
 # =========================
@@ -235,14 +272,26 @@ def make_encoder_batch(
     batch_samples: list[EvalSample],
     *,
     pad_token_id: int,
+    cpword_bos_token: list[int],
+    cpword_eos_token: list[int],
     max_source_length: int,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     tensors: list[torch.Tensor] = []
     feature_dim: int | None = None
+    max_source_content_length = max_source_length - 2
+
+    if max_source_content_length <= 0:
+        raise ValueError("max_source_length must be >= 2 to include CPWord BOS/EOS")
 
     for sample in batch_samples:
-        trimmed = sample.cpword_ids[:max_source_length]
+        stripped = strip_cpword_special_tokens(
+            sample.cpword_ids,
+            bos_token=cpword_bos_token,
+            eos_token=cpword_eos_token,
+        )
+        trimmed_content = stripped[:max_source_content_length]
+        trimmed = [cpword_bos_token, *trimmed_content, cpword_eos_token]
         if not trimmed:
             raise ValueError(f"Sample {sample.sample_id} has empty selected_cpword_ids")
 
@@ -503,6 +552,7 @@ def run_inference_on_eval_dataset(
         top_k = None
 
     autocast_dtype = resolve_autocast_dtype(dtype_mode, device)
+    cpword_bos_token, cpword_eos_token = resolve_cpword_bos_eos_tokens()
     batches = build_inference_batches(
         samples,
         batch_size=batch_size,
@@ -543,6 +593,8 @@ def run_inference_on_eval_dataset(
                 encoder_input_tokens, encoder_padding_mask = make_encoder_batch(
                     batch_samples,
                     pad_token_id=pad_token_id,
+                    cpword_bos_token=cpword_bos_token,
+                    cpword_eos_token=cpword_eos_token,
                     max_source_length=max_source_length,
                     device=device,
                 )
