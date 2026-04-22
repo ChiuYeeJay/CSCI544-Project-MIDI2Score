@@ -2,7 +2,7 @@ model:
   encoder:
     d_model: 512
     nhead: 8
-    num_layers: 8
+    num_layers: 6
     dim_feedforward: 2048
     dropout: 0.1
     activation: gelu
@@ -20,7 +20,7 @@ model:
     vocab_size: 5000
     d_model: 512
     nhead: 8
-    num_layers: 4
+    num_layers: 6
     dim_feedforward: 2048
     dropout: 0.1
     activation: gelu
@@ -76,7 +76,7 @@ training:
   # ===== training =====
   num_steps: null
   num_epochs: 16
-  max_duration_seconds: 9000
+  max_duration_seconds: 10800
 
   # ===== eval =====
   val_check_interval: 1.0

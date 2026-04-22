@@ -76,7 +76,7 @@ training:
   # ===== training =====
   num_steps: null
   num_epochs: 16
-  max_duration_seconds: 10500
+  max_duration_seconds: 9000
 
   # ===== eval =====
   val_check_interval: 1.0
