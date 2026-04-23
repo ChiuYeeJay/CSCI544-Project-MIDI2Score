@@ -529,10 +529,23 @@ def run_seq2seq_training_loop(
         callbacks.append(
             ModelCheckpoint(
                 dirpath=Path(training_config.save_best_checkpoint_path).parent,
-                filename="best-checkpoint-{step}-{val/loss:.4f}",
+                filename="best-checkpoint-{step}",
                 monitor="val/loss",
                 mode="min",
                 save_top_k=1,
+            )
+        )
+
+    if training_config.save_checkpoint_path:
+        callbacks.append(
+            ModelCheckpoint(
+                dirpath=Path(training_config.save_checkpoint_path).parent / "swa_ckpts",
+                filename="epoch-{epoch:02d}",
+                every_n_epochs=1,
+                save_top_k=4,
+                monitor="epoch",
+                mode="max",
+                auto_insert_metric_name=False,
             )
         )
 
@@ -589,9 +602,11 @@ def run_seq2seq_training_loop(
     best_ckpt_path = None
     best_val_loss = None
     for cb in trainer.callbacks:
-        if isinstance(cb, L.pytorch.callbacks.ModelCheckpoint):
+        if isinstance(cb, L.pytorch.callbacks.ModelCheckpoint) and cb.monitor == "val/loss":
             best_ckpt_path = cb.best_model_path
             best_val_loss = cb.best_model_score.item() if cb.best_model_score else None
+            print(f"Best checkpoint path: {best_ckpt_path}")
+            break
 
     if best_ckpt_path and training_config.save_best_checkpoint_path:
         target_path = Path(training_config.save_best_checkpoint_path)
