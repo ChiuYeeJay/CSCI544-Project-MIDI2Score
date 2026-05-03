@@ -11,8 +11,7 @@ from music21 import converter
 def musescore_midi_to_musicxml(
     input_folder,
     output_folder,
-    musescore_path,
-    max_files=None
+    musescore_path
 ):
     os.makedirs(output_folder, exist_ok=True)
 
@@ -21,9 +20,6 @@ def musescore_midi_to_musicxml(
     if not midi_files:
         print("No MIDI files found in:", input_folder)
         return
-
-    if max_files:
-        midi_files = midi_files[:max_files]
 
     print(f"[MuseScore] Converting {len(midi_files)} files...")
 
@@ -51,8 +47,7 @@ def musescore_midi_to_musicxml(
 # =========================
 def music21_midi_to_musicxml(
     input_folder,
-    output_folder,
-    max_files=None
+    output_folder
 ):
     os.makedirs(output_folder, exist_ok=True)
 
@@ -62,8 +57,6 @@ def music21_midi_to_musicxml(
         print("No MIDI files found in:", input_folder)
         return
 
-    if max_files:
-        midi_files = midi_files[:max_files]
 
     print(f"[music21] Converting {len(midi_files)} files...")
 
@@ -105,28 +98,19 @@ def main():
         help="Path to MuseScore executable"
     )
 
-    parser.add_argument(
-        "--max-files",
-        type=int,
-        default=None,
-        help="Limit number of files processed"
-    )
-
     args = parser.parse_args()
 
     if args.method == "music21":
         music21_midi_to_musicxml(
             args.input,
-            args.output,
-            max_files=args.max_files
+            args.output
         )
 
     elif args.method == "musescore":
         musescore_midi_to_musicxml(
             args.input,
             args.output,
-            args.musescore_path,
-            max_files=args.max_files
+            args.musescore_path
         )
 
 
