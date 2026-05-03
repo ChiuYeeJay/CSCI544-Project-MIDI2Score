@@ -1,0 +1,3 @@
+[submodule "decoder_pretraining"]
+	path = decoder_pretraining
+	url = https://github.com/daniellaah/MIDI2Score.git
