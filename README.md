@@ -2,6 +2,13 @@
 
 ## Enviroment Setup
 
+1. Install MuseScore for evaluation: https://musescore.org/en/download
+
+2. Install requirements
+```sh
+pip install -r requirements.txt
+```
+
 ## Dataset and Tokenizer Preparation
 
 ### PDMX Download
@@ -52,7 +59,7 @@ cd PROJECT_ROOT
 python3 hf_dataset/hf_dataset_lmx.py
 ```
 
-This will This will generate a dataset with only LMX sequences (without MIDI data) at `dataset/huggingface`.
+This will generate a dataset with only LMX sequences (without MIDI data) at `dataset/huggingface`.
 
 #### For Seq2Seq Training
 
@@ -98,6 +105,33 @@ This will start the training process, and finally generate the best/latest model
 ### Our Model
 
 ### External Models
+To convert your midi files using external models, run this code
+```sh
+cd PROJECT_ROOT
+python3 convert.py --input <input_folder> --output <output_folder> --method <music21|musescore>
+```
+For example if you have midi files in a folder called "midi_folder" and wanted to output them to "music21_folder" using music21 to convert them, run :
+```sh
+cd PROJECT_ROOT
+python3 convert.py --input midi_folder --output music21_folder --method music21
+```
+If you have a different path for musescore, and want to convert your midi files to musicxml using musescore, run this
+```sh
+cd PROJECT_ROOT
+python3 convert.py --input midi_folder --output musescore_folder --method musescore --musescore-path PATH_TO_MUSESCORE
+```
+
+After you have your midis converted and want to get evaluation statistics on your musecore folder, run this:
+
+```sh
+cd PROJECT_ROOT
+python3 evaluation.py --pred_xml_dir musescore_folder --gt_xml_dir ground_truth_folder
+```
+If you want statistics based on clean, light or heavy, find the jsonl file and run this:
+ ```sh
+ cd PROJECT_ROOT
+ python3 evaluation.py --pred_xml_dir musescore_folder --gt_xml_dir ground_truth_folder --manifest_jsonl manifest.jsonl
+ ```
 
 ## Reproducing Our Results
 
