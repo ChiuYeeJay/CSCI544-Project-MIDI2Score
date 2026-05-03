@@ -6,8 +6,14 @@
 
 2. Install requirements
 ```sh
+# with pip
 pip install -r requirements.txt
+
+# with uv (https://docs.astral.sh/uv/)
+uv sync
 ```
+
+If uv is used for python enviroment management, please replace all `python3` with `uv run` in the following instructions, or run `source .venv/bin/activate` beforehand.
 
 ## Dataset and Tokenizer Preparation
 
@@ -93,6 +99,7 @@ In the config files, there are some specified paths for dataset location, tokeni
 The seq2seq training can be started by executing the following command:
 
 ```sh
+cd PROJECT_ROOT
 python3 run_seq2seq.py --config configs/experiments/seq2seq_fullft_32.yaml
 ```
 
