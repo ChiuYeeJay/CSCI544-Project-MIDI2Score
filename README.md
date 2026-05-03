@@ -66,7 +66,30 @@ python3 hf_dataset/hf_dataset_seq2seq_truncate.py --input-path dataset/huggingfa
 
 This will generate a dataset without truncation at `dataset/huggingface_seq2seq` and one with truncation at `dataset/huggingface_seq2seq_truncated`.
 
+#### Generating Dataset for Evaluation
+
+Since external models or applications usually don't use our tokenization scheme, so we need a dataset that contains raw MIDI and MusicXML that is aligned to our truncated dataset for comparison. The `eval_dataset`  can be generated using the following command:
+
+```sh
+cd PROJECT_ROOT
+python3 hf_dataset/hf_dataset_eval_generate.py --input-path dataset/huggingface_seq2seq_truncated --output-root dataset/eval_dataset --tokenizer-path DATA/tokenizer.json --split test  --ratio-clean 1 --ratio-light 1 --ratio-heavy 1 --seed 42 --overwrite
+```
+
+This will produce a dataset with aligned MIDI, CPWord, MusicXML, LMX data, and some meta data at `dataset/eval_dataset`.
+
 ## Seq2Seq Model Training
+
+We use config files to manage model hyper-parameters and other configuration of training. The configs that were used in experiments and debugging are in `configs` directory.
+
+In the config files, there are some specified paths for dataset location, tokenizer record, pre-trained decoder weights, and optionally other paths. The paths need to be changed to the real path or the corresponding files should be moved to the specified location, so that the training can be started.
+
+The seq2seq training can be started by executing the following command:
+
+```sh
+python3 run_seq2seq.py --config configs/experiments/seq2seq_fullft_32.yaml
+```
+
+This will start the training process, and finally generate the best/latest model weight and the weight for the last 4 epochs at the specified location in the config file (for the example above, they are saved in the `artifacts/seq2seq` directory). Also, the log data will be saved to the specified path, with default tensorboard and CSV logs, as well as optional wandb data (for the example above, they are stored in `logs` directory).
 
 ## Evaluation
 
@@ -77,3 +100,18 @@ This will generate a dataset without truncation at `dataset/huggingface_seq2seq`
 ### External Models
 
 ## Reproducing Our Results
+
+The training configs we use for experiment and the final result are as the followings:
+
+| **Title**                              | **Used in**                | **config name (in `configs/experiments`)** |
+| -------------------------------------- | -------------------------- | ----------------------------------------------------- |
+| LoRA without Curriculum Learning       | Experiment 1               | `seq2seq_lora_no_curriculum.yaml`                     |
+| LoRA with Curriculum Learning          | Experiment 1, 2            | `seq2seq_lora_16.yaml`                                |
+| Full Fine-tuning                       | Experiment 2, 3            | `seq2seq_fullft.yaml`                                 |
+| End-to-End                             | Experiment 3, 4            | `seq2seq_e2e.yaml`                                    |
+| End-to-End with Symmetric Architecture | Experiment 4               | `seq2seq_e2e_symmetric.yaml`                          |
+| Main Result                            | Main Result and Comparison | `seq2seq_fullft_32.yaml`                              |
+
+The necessary "DATA" directory can be found on the [Google Drive](https://drive.google.com/file/d/1M_ztdOLgMSm0FcB7N67u9xk7owL8ZFqn/view?usp=sharing), including datasets, pre-trained decoder weights and the tokenizer record file.
+
+The seq2seq training process are all done with A40 instances on the CARC.
