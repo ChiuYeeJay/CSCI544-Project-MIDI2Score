@@ -252,8 +252,8 @@ if __name__ == "__main__":
     main_start_time = time.time()
 
     df = pd.read_csv(os.path.join(PDMX_ROOT, "PDMX.csv"))
-    # df_filtered = df[df["subset:rated_deduplicated"]]
-    df_filtered = df
+    df_filtered = df[df["subset:rated_deduplicated"]]
+    # df_filtered = df
     df_filtered = df_filtered.loc[:, ["mxl", "subset:deduplicated", "subset:rated", "subset:rated_deduplicated"]]
     df_filtered = df_filtered[~df_filtered["mxl"].isna()]
     df_filtered = df_filtered.reset_index(drop=True)

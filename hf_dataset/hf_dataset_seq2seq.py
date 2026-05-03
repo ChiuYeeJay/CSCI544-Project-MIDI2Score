@@ -13,10 +13,10 @@ from tokenizer.midi_augmentation import apply_midi_augmentation
 # ==========================================
 # 1. Parameter and Path Configuration
 # ==========================================
-PDMX_PREPROCESSED_ROOT = "dataset/PDMX_preprocessed_rd"
+PDMX_PREPROCESSED_ROOT = "dataset/PDMX_preprocessed"
 CSV_PATH = os.path.join(PDMX_PREPROCESSED_ROOT, "dataset_info_with_partitions.csv")
-HF_OUTPUT_DIR = "dataset/huggingface_seq2seq_v3"
-BPE_MODEL_PATH = "tokenizer/tokenizer_rd.json"
+HF_OUTPUT_DIR = "dataset/huggingface_seq2seq"
+BPE_MODEL_PATH = "tokenizer/tokenizer.json"
 MAX_SEQ_LENGTH = 10000
 
 def main():
