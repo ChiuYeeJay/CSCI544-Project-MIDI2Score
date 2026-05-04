@@ -1,22 +1,23 @@
 # CSCI544-Project-MIDI2Score
 
 ## Environment Setup
+#### Python Environment
 
-1. Install MuseScore for evaluation: https://musescore.org/en/download
+Python version: `>=3.11`
 
-2. Install requirements
 ```sh
 # with pip
 pip install -r requirements.txt
 
 # with uv (https://docs.astral.sh/uv/)
 uv sync
-
-# install partitura explicitly if needed
-pip install partitura
 ```
 
 If uv is used for Python environment management, please replace all `python3` with `uv run` in the following instructions, or run `source .venv/bin/activate` beforehand.
+
+#### MuseScore installation for Evaluation
+
+Install MuseScore for evaluation: https://musescore.org/en/download
 
 ## Dataset and Tokenizer Preparation
 
@@ -47,10 +48,20 @@ python3 hf_dataset/hf_dataset_lmx.py
 
 # 4.2 For seq2seq model training, and apply bar-aware truncation
 python3 hf_dataset/hf_dataset_seq2seq.py
-python3 hf_dataset/hf_dataset_seq2seq_truncate.py --input-path dataset/huggingface_seq2seq --output-path dataset/huggingface_seq2seq_truncated --tokenizer-path tokenizer/tokenizer.json --max-source-length 1022 --max-target-length 1022 --lookahead-tokens 0
+python3 hf_dataset/hf_dataset_seq2seq_truncate.py \
+  --input-path dataset/huggingface_seq2seq \
+  --output-path dataset/huggingface_seq2seq_truncated \
+  --tokenizer-path tokenizer/tokenizer.json \
+  --max-source-length 1022 --max-target-length 1022 \
+  --lookahead-tokens 0
 
 # 4.3 For evaluation
-python3 hf_dataset/hf_dataset_eval_generate.py --input-path dataset/huggingface_seq2seq_truncated --output-root dataset/eval_dataset --tokenizer-path DATA/tokenizer.json --split test  --ratio-clean 1 --ratio-light 1 --ratio-heavy 1 --seed 42 --overwrite
+python3 hf_dataset/hf_dataset_eval_generate.py \
+  --input-path dataset/huggingface_seq2seq_truncated \
+  --output-root dataset/eval_dataset \
+  --tokenizer-path DATA/tokenizer.json --split test \
+  --ratio-clean 1 --ratio-light 1 --ratio-heavy 1 \
+  --seed 42 --overwrite
 ```
 
 This will generate three target datasets, a tokenizer file, and some intermediate datasets or files. The generated datasets/files that will be used in the later training process include:
@@ -104,20 +115,9 @@ This will start the training process, and finally generate the best/latest model
 
 ### Our Model
 
-
-
-Please make sure `partitura` is installed before running XML evaluation:
-
-```bash
-# with pip
-pip install partitura
-```
-
-
-
 Our model prediction and evaluation are handled by:
 ```bash
-python midi2score/pred_seq2seq.py
+python3 midi2score/pred_seq2seq.py
 ```
 **If your evaluation assets are stored under a different directory name (for example `dataset/` instead of `DATA/`), please replace the paths in the commands accordingly.(Same for different model name/yaml)**
 
