@@ -133,6 +133,12 @@ If you want statistics based on clean, light or heavy, find the jsonl file and r
  python3 evaluation.py --pred_xml_dir musescore_folder --gt_xml_dir ground_truth_folder --manifest_jsonl manifest.jsonl
  ```
 
+ To replicate the evaluation we did on our examples, use this command
+ ```sh
+ cd PROJECT_ROOT
+ python3 evaluation.py --pred_xml_dir musescore_folder --gt_xml_dir ground_truth_folder --manifest_jsonl manifest.jsonl --onset_tol 0.25 --duration_tol 0.25
+ ```
+
 ## Reproducing Our Results
 
 The training configs we use for experiment and the final result are as the followings:
