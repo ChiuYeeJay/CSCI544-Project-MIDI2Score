@@ -119,15 +119,16 @@ Our model prediction and evaluation are handled by:
 ```bash
 python midi2score/pred_seq2seq.py
 ```
-If your evaluation assets are stored under a different directory name (for example `dataset/` instead of `DATA/`), please replace the paths in the commands accordingly.
+**If your evaluation assets are stored under a different directory name (for example `dataset/` instead of `DATA/`), please replace the paths in the commands accordingly.(Same for different model name/yaml)**
+
 This script will:
 
-load the seq2seq checkpoint
-read the evaluation HuggingFace dataset from DATA/eval_dataset/hf_dataset
-generate predicted LMX
-convert predicted LMX to MusicXML
-run XML evaluation automatically
-save outputs and evaluation reports to the output directory
+- load the seq2seq checkpoint
+- read the evaluation HuggingFace dataset from DATA/eval_dataset/hf_dataset
+- generate predicted LMX
+- convert predicted LMX to MusicXML
+- run XML evaluation automatically
+- save outputs and evaluation reports to the output directory
 
 #### Basic example
 ```bash
