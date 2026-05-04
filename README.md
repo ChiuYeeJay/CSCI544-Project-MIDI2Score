@@ -97,6 +97,12 @@ For seq2seq training, in addition to BPE LMX tokens, we also add noise to MIDI a
 
 For evaluation, since external models or applications don't use our tokenization scheme, we need a dataset that contains raw MIDI and MusicXML that is aligned to our truncated dataset for comparison. The command will produce a dataset with aligned MIDI, CPWord, MusicXML, LMX data, and some meta data at `dataset/eval_dataset`.
 
+## Decoder Pre-Training
+
+**[Decoder Repository](https://github.com/daniellaah/MIDI2Score/tree/25121ae4936f1fe4bba7d6e19de8c69c0f5b3fbd)**
+
+Our decoder pre-training is done separately from the main repository. For the detail instructions for data pipeline, training procedure and other configuration, please refer to the [readme](https://github.com/daniellaah/MIDI2Score/blob/25121ae4936f1fe4bba7d6e19de8c69c0f5b3fbd/README.md) file of the decoder repository.
+
 ## Seq2Seq Model Training
 
 We use config files to manage model hyperparameters and other training configurations. In the config files, there are some specified paths for dataset location, tokenizer record, pre-trained decoder weights, and other optional paths. These paths need to be changed to the real location, or the corresponding files should be moved to the specified location, so that the training can be proceeded without error.
@@ -110,8 +116,6 @@ python3 run_seq2seq.py --config <config_file>
 This will start the training process, and finally generate the best/latest model weight and the weights for the last 4 epochs at the specified location in the config file. Also, the log data will be saved to the specified path, with default TensorBoard and CSV logs, as well as optional wandb data.
 
 ## Evaluation
-
-### Running Prediction
 
 ### Our Model
 
