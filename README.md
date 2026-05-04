@@ -104,13 +104,56 @@ This will start the training process, and finally generate the best/latest model
 
 ### Our Model
 
-```md
-### Our Model
 
-Our model prediction and evaluation are handled by:
+
+Please make sure `partitura` is installed before running XML evaluation:
 
 ```bash
+# with pip
+pip install partitura
+```
+
+
+
+Our model prediction and evaluation are handled by:
+```bash
 python midi2score/pred_seq2seq.py
+```
+If your evaluation assets are stored under a different directory name (for example `dataset/` instead of `DATA/`), please replace the paths in the commands accordingly.
+This script will:
+
+load the seq2seq checkpoint
+read the evaluation HuggingFace dataset from DATA/eval_dataset/hf_dataset
+generate predicted LMX
+convert predicted LMX to MusicXML
+run XML evaluation automatically
+save outputs and evaluation reports to the output directory
+
+#### Basic example
+```bash
+cd PROJECT_ROOT
+python midi2score/pred_seq2seq.py \
+  --config configs/seq2seq_lora.yaml \
+  --ckpt checkpoints/lora_24epoch_best.pt \
+  --eval-root DATA/eval_dataset \
+  --out-dir outputs/eval_test \
+  --batch-size 4 \
+  --max-samples 10
+```
+#### Example with flexible XML evaluation tolerance
+```bash
+cd PROJECT_ROOT
+python midi2score/pred_seq2seq.py \
+  --config configs/seq2seq_lora.yaml \
+  --ckpt checkpoints/lora_24epoch_best.pt \
+  --eval-root DATA/eval_dataset \
+  --out-dir outputs/eval_test \
+  --batch-size 4 \
+  --max-samples 10 \
+  --onset-tol 0.25 \
+  --duration-tol 0.25
+```
+
 
 ### External Models
 To convert your midi files using external models, run this code
