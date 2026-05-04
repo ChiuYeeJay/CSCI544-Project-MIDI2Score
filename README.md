@@ -11,6 +11,9 @@ pip install -r requirements.txt
 
 # with uv (https://docs.astral.sh/uv/)
 uv sync
+
+# install partitura explicitly if needed
+pip install partitura
 ```
 
 If uv is used for Python environment management, please replace all `python3` with `uv run` in the following instructions, or run `source .venv/bin/activate` beforehand.
@@ -100,6 +103,14 @@ This will start the training process, and finally generate the best/latest model
 ### Running Prediction
 
 ### Our Model
+
+```md
+### Our Model
+
+Our model prediction and evaluation are handled by:
+
+```bash
+python midi2score/pred_seq2seq.py
 
 ### External Models
 To convert your midi files using external models, run this code
