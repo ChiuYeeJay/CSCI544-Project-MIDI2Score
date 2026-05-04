@@ -1,9 +1,14 @@
 # CSCI544-Project-MIDI2Score
 
 ## Environment Setup
+
+#### OS and Device
+
+Our development of data pipeline and seq2seq model training are done on **MacOS 26.4.1** and **Rocky Linux 8** (with A40 on CARC). The decoder training is run on **MacOS** with `mps` backend. The evaluation is run on **Windows**.
+
 #### Python Environment
 
-Python version: `>=3.11`
+Python version: `>=3.11`.
 
 ```sh
 # with pip
@@ -101,7 +106,9 @@ For evaluation, since external models or applications don't use our tokenization
 
 **[Decoder Repository](https://github.com/daniellaah/MIDI2Score/tree/25121ae4936f1fe4bba7d6e19de8c69c0f5b3fbd)**
 
-Our decoder pre-training is done separately from the main repository. For the detail instructions for data pipeline, training procedure and other configuration, please refer to the [readme](https://github.com/daniellaah/MIDI2Score/blob/25121ae4936f1fe4bba7d6e19de8c69c0f5b3fbd/README.md) file of the decoder repository.
+Our decoder pre-training is done separately from the main repository. For the detail instructions for building data pipeline, model, training and other configuration, please refer to the [readme](https://github.com/daniellaah/MIDI2Score/blob/25121ae4936f1fe4bba7d6e19de8c69c0f5b3fbd/README.md) file of the decoder repository.
+
+After the pre-training has been run through, it should produce pre-trained decoder weights that will be used later for the seq2seq training.
 
 ## Seq2Seq Model Training
 
@@ -197,7 +204,9 @@ If you want statistics based on clean, light or heavy, find the jsonl file and r
 
 ## Reproducing Our Results
 
-The training configs we use for experiments and the final result are as follows:
+Our result was produced with executing the above steps sequentially to setup environment, generate datasets, training the decoder and seq2seq model, and finally run the evaluation.
+
+The configuration files we use for experiments and the final result are as follows:
 
 | **Title**                              | **Used in**                | **config name (in `configs/experiments`)** |
 | -------------------------------------- | -------------------------- | ----------------------------------------------------- |
@@ -208,6 +217,7 @@ The training configs we use for experiments and the final result are as follows:
 | End-to-End with Symmetric Architecture | Experiment 4               | `seq2seq_e2e_symmetric.yaml`                          |
 | Main Result                            | Main Result and Comparison | `seq2seq_fullft_32.yaml`                              |
 
-The necessary "DATA" directory can be found on the [Google Drive](https://drive.google.com/file/d/1M_ztdOLgMSm0FcB7N67u9xk7owL8ZFqn/view?usp=sharing), including datasets, pre-trained decoder weights, and the tokenizer record file.
+The "DATA" directory we use can be found on the [Google Drive](https://drive.google.com/file/d/1M_ztdOLgMSm0FcB7N67u9xk7owL8ZFqn/view?usp=sharing), including datasets, pre-trained decoder weights, and the tokenizer record file.
 
-The seq2seq training processes are all done with A40 instances on the CARC.
+The weight of our main result can also be downloaded on this [Google Drive link](https://drive.google.com/file/d/1KbNUtJXRJiQ9d7K9ufCfR6tUVblezu5a/view?usp=sharing).
+
