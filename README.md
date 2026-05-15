@@ -1,5 +1,7 @@
 # CSCI544-Project-MIDI2Score
 
+[\[paper\]](https://github.com/ChiuYeeJay/CSCI544-Project-MIDI2Score/blob/main/CSCI544_Final_Report_Group13.pdf)
+
 Code repo for CSCI544 Group13 "**MIDI to Score with Pretrained MusicXML Decoder**".
 
 ## Environment Setup
