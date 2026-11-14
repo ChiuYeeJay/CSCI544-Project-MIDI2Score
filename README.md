@@ -74,6 +74,7 @@ Noisy Played MIDI ──► CPWord Compound Tokens ──► 8-Layer Encoder (De
 ├── hf_dataset/              # Dataset builders and synchronous bar-aware truncation scripts
 ├── configs/                 # YAML configurations for ablations and final models
 ├── run_seq2seq.py           # Entry point for Seq2Seq training
+├── transcribe.py            # Transcribe one MIDI file to MusicXML
 ├── convert.py               # Batch conversion script for external baselines (music21 / MuseScore)
 └── evaluation.py            # Standardized MusicXML evaluation suite
 ```
@@ -111,7 +112,20 @@ pip install -r requirements.txt
 
 ### 3. Inference & Score Generation
 
-Once weights and the evaluation dataset are ready, run `midi2score/pred_seq2seq.py` to transcribe MIDI inputs into standard `.musicxml` files and compute evaluation metrics:
+To transcribe a single MIDI file, run `transcribe.py` with the checkpoint, the YAML config for that checkpoint, and the LMX BPE tokenizer:
+
+```bash
+python3 transcribe.py \
+  --midi input.mid \
+  --checkpoint checkpoints/<model_checkpoint>.pt \
+  --tokenizer tokenizer/tokenizer.json \
+  --config configs/experiments/seq2seq_fullft_32.yaml \
+  --output output.musicxml
+```
+
+`--config` has to match the checkpoint architecture, because the `.pt` file stores weights only. `--tokenizer` is the LMX BPE file (`tokenizer.json`); the script encodes MIDI with the CPWord tokenizer in this repository. Omit `--output` to write `<midi_stem>.musicxml` next to the input. Sequences longer than `max_source_length` (1024 in the example config, including BOS and EOS) are cut from the front, and the script prints a warning. `--save-lmx` also writes the intermediate LMX. The device defaults to `auto`: CUDA, then Apple Silicon MPS, then CPU.
+
+Once an evaluation dataset is ready, run `midi2score/pred_seq2seq.py` to transcribe that set into `.musicxml` files and compute evaluation metrics:
 
 ```bash
 python3 midi2score/pred_seq2seq.py \

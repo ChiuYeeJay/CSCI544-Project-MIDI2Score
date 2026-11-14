@@ -74,6 +74,7 @@ PDMX 樂譜庫 ──► LMX 線性化 + BPE ──► 小節感知切分 (Bar-a
 ├── hf_dataset/              # 資料集建置與小節感知截斷工具
 ├── configs/                 # 實驗與最終模型之 YAML 設定檔
 ├── run_seq2seq.py           # Seq2Seq 模型訓練入口腳本
+├── transcribe.py            # 將單一 MIDI 檔轉成 MusicXML
 ├── convert.py               # 外部 Baseline (music21 / MuseScore) 批次轉譜工具
 └── evaluation.py            # 標準化樂譜評估指標系統
 ```
@@ -111,7 +112,20 @@ pip install -r requirements.txt
 
 ### 3. 執行模型推論與樂譜生成
 
-備妥權重與評估資料集後，可使用 `midi2score/pred_seq2seq.py` 將測試集中的 MIDI 轉譯為標準 `.musicxml` 樂譜並自動執行評估：
+若要轉譯單一 MIDI 檔，使用 `transcribe.py`，並提供模型權重、與該權重對應的 YAML 設定，以及 LMX BPE tokenizer：
+
+```bash
+python3 transcribe.py \
+  --midi input.mid \
+  --checkpoint checkpoints/<model_checkpoint>.pt \
+  --tokenizer tokenizer/tokenizer.json \
+  --config configs/experiments/seq2seq_fullft_32.yaml \
+  --output output.musicxml
+```
+
+`.pt` 只存權重，所以 `--config` 必須與該 checkpoint 的架構一致。`--tokenizer` 是 LMX BPE 檔（`tokenizer.json`）；MIDI 會用本專案內建的 CPWord tokenizer 編碼。省略 `--output` 時，樂譜會寫在 MIDI 旁邊，副檔名為 `.musicxml`。長度超過 `max_source_length`（範例設定為 1024，含 BOS 與 EOS）的曲子只保留前段，腳本會印出警告。加上 `--save-lmx` 會一併寫出中間的 LMX。裝置預設為 `auto`：依序使用 CUDA、Apple Silicon MPS、CPU。
+
+備妥評估資料集後，可使用 `midi2score/pred_seq2seq.py` 將測試集中的 MIDI 轉譯為標準 `.musicxml` 樂譜並自動執行評估：
 
 ```bash
 python3 midi2score/pred_seq2seq.py \
