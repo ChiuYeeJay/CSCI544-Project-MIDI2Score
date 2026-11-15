@@ -6,6 +6,7 @@
 
 [![Final Report](https://img.shields.io/badge/PDF-Final_Report-red)](./CSCI544_Final_Report_Group13.pdf)
 [![GitHub Releases](https://img.shields.io/badge/GitHub_Releases-Weights_%26_Tokenizer-blue)](https://github.com/ChiuYeeJay/CSCI544-Project-MIDI2Score/releases)
+[![Demo](https://img.shields.io/badge/Live_Demo-Score_Examples-brightgreen)](https://chiuyeejay.github.io/CSCI544-M2S-Web-Demo/)
 
 [English](./README.md) | [繁體中文](./README_zh-TW.md) | [简体中文](./README_zh-CN.md)
 
@@ -35,6 +36,8 @@ Targeting this realistic scenario—where the underlying beat grid is reliable, 
 ---
 
 ## Architecture & Methodology
+
+![Model architecture: MIDI is tokenized into CPWord tokens, embedded, encoded by an 8-layer encoder, then decoded autoregressively by a 4-layer decoder into LMX tokens and detokenized into MusicXML](./assets/Model%20Architecture.drawio.png)
 
 ### System Pipeline
 
@@ -153,6 +156,8 @@ python3 run_seq2seq.py --config configs/experiments/seq2seq_fullft_32.yaml
 ---
 
 ## Evaluation & Results
+
+Side-by-side score examples—source MIDI, ground truth, our model, MuseScore, and Beyer et al. (2024) under Clean, Light, and Heavy timing noise—are on the **[demo page](https://chiuyeejay.github.io/CSCI544-M2S-Web-Demo/)**.
 
 ### Key Ablation Findings
 

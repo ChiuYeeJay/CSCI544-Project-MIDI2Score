@@ -6,6 +6,7 @@
 
 [![Final Report](https://img.shields.io/badge/PDF-Final_Report-red)](./CSCI544_Final_Report_Group13.pdf)
 [![GitHub Releases](https://img.shields.io/badge/GitHub_Releases-Weights_%26_Tokenizer-blue)](https://github.com/ChiuYeeJay/CSCI544-Project-MIDI2Score/releases)
+[![Demo](https://img.shields.io/badge/Live_Demo-Score_Examples-brightgreen)](https://chiuyeejay.github.io/CSCI544-M2S-Web-Demo/)
 
 [English](./README.md) | [繁體中文](./README_zh-TW.md) | [简体中文](./README_zh-CN.md)
 
@@ -35,6 +36,8 @@
 ---
 
 ## 技术架构与方法解析
+
+![模型架构：MIDI 经 tokenization 转为 CPWord tokens，通过 embedding layer 与 8 层 encoder，再由 4 层 decoder 自回归产生 LMX tokens，最后 de-tokenization 成 MusicXML](./assets/Model%20Architecture.drawio.png)
 
 ### 系统流程概览
 
@@ -153,6 +156,8 @@ python3 run_seq2seq.py --config configs/experiments/seq2seq_fullft_32.yaml
 ---
 
 ## 实验与评估结果
+
+不同噪声强度（Clean／Light／Heavy）下，来源 MIDI、标准答案、本模型、MuseScore 与 Beyer et al. (2024) 的乐谱对照范例，见 **[Demo](https://chiuyeejay.github.io/CSCI544-M2S-Web-Demo/)**。
 
 ### 消融实验重点发现
 
